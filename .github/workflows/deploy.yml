@@ -283,11 +283,40 @@ jobs:
 
       - name: Terraform plan
         run: |
+          set -o pipefail
+          echo "enable_domain_mappings=${{ (inputs.enable_domain_mappings && 'true') || (vars.ENABLE_DOMAIN_MAPPINGS || 'false') }}"
           terraform plan -input=false -out=tfplan \
-            -var "enable_domain_mappings=${{ (inputs.enable_domain_mappings && 'true') || (vars.ENABLE_DOMAIN_MAPPINGS || 'false') }}"
+            -var "enable_domain_mappings=${{ (inputs.enable_domain_mappings && 'true') || (vars.ENABLE_DOMAIN_MAPPINGS || 'false') }}" \
+            2>&1 | tee tfplan.log
 
       - name: Terraform apply
-        run: terraform apply -input=false -auto-approve tfplan
+        run: |
+          set -o pipefail
+          terraform apply -input=false -auto-approve tfplan 2>&1 | tee tfapply.log
+
+      # The runner log needs repository admin access to download. Republishing the
+      # provider error as annotations makes it readable by anyone who can see the
+      # check run (and it is highlighted in the UI).
+      - name: Surface Terraform errors
+        if: failure()
+        run: |
+          set +e
+          log=""
+          [ -f tfapply.log ] && log=tfapply.log
+          [ -z "$log" ] && [ -f tfplan.log ] && log=tfplan.log
+          [ -z "$log" ] && { echo "no terraform log captured"; exit 0; }
+          # Keep the first provider error block: that is the actionable one.
+          awk '/[│|] Error:|^Error:/{flag=1} flag{print} /^[│|] *$/{if(flag){exit}}' "$log" \
+            | sed -E 's/^[│|] ?//' | head -40 > terraform-error.txt
+          cat terraform-error.txt
+          if [ -s terraform-error.txt ]; then
+            title="$(head -1 terraform-error.txt | cut -c1-120)"
+            body="$(tail -n +2 terraform-error.txt | tr '\n' ' ' | cut -c1-900)"
+            echo "::error title=$title::$body"
+          else
+            echo "::error::terraform failed; last 20 log lines:"
+            tail -20 "$log" | while IFS= read -r line; do echo "::error::$line"; done
+          fi
 
       - name: Publish outputs
         run: |
