@@ -144,10 +144,10 @@ jobs:
             echo "environment are only visible to jobs that declare it. This workflow"
             echo "uses '${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}'."
             echo "  repository level : gh variable set NAME --body VALUE"
-            echo "  environment level: gh variable set NAME --env production --body VALUE"
-            echo "  list what exists : gh variable list / gh secret list [--env production]"
+            echo "  environment level: gh variable set NAME --env '${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}' --body VALUE"
+            echo "  list what exists : gh variable list / gh secret list [--env '${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}']"
             echo
-            echo "Set everything with scripts/setup-github.sh --env production"
+            echo "Set everything with scripts/setup-github.sh --env '${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}'"
             echo "(values in infra/BOOTSTRAP.md)."
             exit 1
           fi
