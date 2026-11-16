@@ -379,7 +379,7 @@ jobs:
           }
 
           check python            "$api/health"   || fail=1
-          check web               "$web/healthz"  || fail=1
-          check index             "$index/healthz" || fail=1
+          check web               "$web/health"   || fail=1
+          check index             "$index/health" || fail=1
           check "index->python"   "$index/readyz" || fail=1
           exit "$fail"
