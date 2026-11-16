@@ -1,4 +1,4 @@
-// Original file: /home/joscart/Work/Lirify/proto/lirify.proto
+// Original file: proto/lirify.proto
 
 import type { FailedSong as _lirify_v1_FailedSong, FailedSong__Output as _lirify_v1_FailedSong__Output } from '../../lirify/v1/FailedSong';
 

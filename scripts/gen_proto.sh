@@ -30,6 +30,19 @@ fi
 
 PYTHON_BIN="${PYTHON:-python3}"
 
+# Generated headers embed the generator versions. CI pins protoc 36.1,
+# grpcio-tools 1.66.2, protoc-gen-go 1.36.6 and protoc-gen-go-grpc 1.5.1; using a
+# different protoc locally produces a header-only diff that fails --check.
+EXPECTED_PROTOC="36.1"
+if command -v protoc >/dev/null 2>&1; then
+  ACTUAL_PROTOC="$(protoc --version | awk '{print $2}')"
+  echo "protoc: ${ACTUAL_PROTOC}"
+  if [[ "$ACTUAL_PROTOC" != "$EXPECTED_PROTOC" ]]; then
+    echo "    warning: CI pins protoc ${EXPECTED_PROTOC}; a mismatch only changes" >&2
+    echo "    the generated version header, not the stubs themselves." >&2
+  fi
+fi
+
 echo "==> python stubs"
 if "$PYTHON_BIN" -c "import grpc_tools.protoc" >/dev/null 2>&1; then
   "$PYTHON_BIN" -m grpc_tools.protoc \
@@ -65,11 +78,19 @@ find "$GO_OUT" -name '*.pb.go' -exec sh -c '
 ' sh {} +
 
 echo "==> typescript types"
-if [ -d "$ROOT/services/web/node_modules/@grpc/proto-loader" ]; then
-  ( cd "$ROOT/services/web" && npx --no-install proto-loader-gen-types \
+TS_GEN="$ROOT/services/web/node_modules/@grpc/proto-loader/build/bin/proto-loader-gen-types.js"
+if [ -f "$TS_GEN" ]; then
+  # Run from the repository root with a repo-relative proto path: the generator
+  # writes "// Original file: <path>" into every file, and an absolute path makes
+  # the output differ between machines (which is what broke CI).
+  ( cd "$ROOT" && node "$TS_GEN" \
       --longs=String --enums=String --defaults --oneofs \
       --grpcLib=@grpc/grpc-js \
-      --outDir="$TS_OUT" "$PROTO" )
+      --outDir="$TS_OUT" proto/lirify.proto )
+
+  # Belt and braces: normalise the header no matter how the generator was run.
+  find "$TS_OUT" -name '*.ts' -exec sed -i -E \
+    's|^// Original file: .*/proto/lirify\.proto$|// Original file: proto/lirify.proto|' {} +
 else
   echo "    skipped: run 'npm install' in services/web first" >&2
 fi

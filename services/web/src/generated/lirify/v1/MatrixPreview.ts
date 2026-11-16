@@ -1,4 +1,4 @@
-// Original file: /home/joscart/Work/Lirify/proto/lirify.proto
+// Original file: proto/lirify.proto
 
 import type { MatrixPreviewRow as _lirify_v1_MatrixPreviewRow, MatrixPreviewRow__Output as _lirify_v1_MatrixPreviewRow__Output } from '../../lirify/v1/MatrixPreviewRow';
 

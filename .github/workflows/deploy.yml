@@ -63,9 +63,16 @@ jobs:
           cache-dependency-path: services/web/package-lock.json
 
       - name: Install protoc, Python and Go gRPC plugins
+        env:
+          # protoc-gen-go embeds the protoc version in every generated header, so
+          # the exact same protoc as the repository is required for --check.
+          PROTOC_VERSION: "36.1"
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends protobuf-compiler
+          sudo apt-get install -y --no-install-recommends unzip
+          curl -sSLo /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          sudo unzip -o -q /tmp/protoc.zip -d /usr/local
           protoc --version
           python -m pip install --upgrade pip
           # Pinned so generated Python stubs stay byte-identical across runs.
@@ -95,12 +102,53 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------------------------------
-  # 2. Build and push all three images. A single tagging scheme keeps the three
+  # 2. Fail fast with an actionable message when repository configuration is
+  #    incomplete. This is the check that turns "pipeline exploded at terraform
+  #    apply" into a one-line list of missing variables/secrets.
+  # ---------------------------------------------------------------------------
+  preflight:
+    name: Preflight configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check repository variables and secrets
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          WEB_DOMAIN: ${{ vars.WEB_DOMAIN }}
+          INDEX_DOMAIN: ${{ vars.INDEX_DOMAIN }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          BOT_INGEST_API_KEY: ${{ secrets.BOT_INGEST_API_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in GCP_PROJECT_ID GCP_REGION GCP_WORKLOAD_IDENTITY_PROVIDER \
+                      GCP_DEPLOY_SERVICE_ACCOUNT TF_STATE_BUCKET WEB_DOMAIN INDEX_DOMAIN; do
+            [ -n "${!name:-}" ] || missing+=("variable:$name")
+          done
+          for name in MONGODB_URI QDRANT_URL QDRANT_API_KEY BOT_INGEST_API_KEY; do
+            [ -n "${!name:-}" ] || missing+=("secret:$name")
+          done
+          if ((${#missing[@]})); then
+            echo "::error::Missing GitHub configuration for this repository"
+            printf '  - %s\n' "${missing[@]}"
+            echo
+            echo "Set them with scripts/setup-github.sh (values in infra/BOOTSTRAP.md)."
+            exit 1
+          fi
+          echo "All required variables and secrets are present."
+
+  # ---------------------------------------------------------------------------
+  # 3. Build and push all three images. A single tagging scheme keeps the three
   #    revisions traceable to one commit.
   # ---------------------------------------------------------------------------
   images:
     name: Build and push images
-    needs: verify
+    needs: [verify, preflight]
     runs-on: ubuntu-latest
     outputs:
       python: ${{ steps.refs.outputs.python }}
@@ -178,7 +226,7 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     name: Terraform apply
-    needs: images
+    needs: [images, preflight]
     runs-on: ubuntu-latest
     environment: production
     defaults:

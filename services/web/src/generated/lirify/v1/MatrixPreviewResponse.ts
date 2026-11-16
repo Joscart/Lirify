@@ -1,4 +1,4 @@
-// Original file: /home/joscart/Work/Lirify/proto/lirify.proto
+// Original file: proto/lirify.proto
 
 import type { TrackSummary as _lirify_v1_TrackSummary, TrackSummary__Output as _lirify_v1_TrackSummary__Output } from '../../lirify/v1/TrackSummary';
 import type { MatrixPreview as _lirify_v1_MatrixPreview, MatrixPreview__Output as _lirify_v1_MatrixPreview__Output } from '../../lirify/v1/MatrixPreview';

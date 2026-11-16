@@ -1,4 +1,4 @@
-// Original file: /home/joscart/Work/Lirify/proto/lirify.proto
+// Original file: proto/lirify.proto
 
 import type { Long } from '@grpc/proto-loader';
 

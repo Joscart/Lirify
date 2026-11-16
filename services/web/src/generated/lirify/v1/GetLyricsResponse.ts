@@ -1,4 +1,4 @@
-// Original file: /home/joscart/Work/Lirify/proto/lirify.proto
+// Original file: proto/lirify.proto
 
 import type { LyricsLine as _lirify_v1_LyricsLine, LyricsLine__Output as _lirify_v1_LyricsLine__Output } from '../../lirify/v1/LyricsLine';
 

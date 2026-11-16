@@ -1,4 +1,4 @@
-// Original file: /home/joscart/Work/Lirify/proto/lirify.proto
+// Original file: proto/lirify.proto
 
 import type { Job as _lirify_v1_Job, Job__Output as _lirify_v1_Job__Output } from '../../lirify/v1/Job';
 

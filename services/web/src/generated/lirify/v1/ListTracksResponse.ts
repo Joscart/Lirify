@@ -1,4 +1,4 @@
-// Original file: /home/joscart/Work/Lirify/proto/lirify.proto
+// Original file: proto/lirify.proto
 
 import type { Track as _lirify_v1_Track, Track__Output as _lirify_v1_Track__Output } from '../../lirify/v1/Track';
 
