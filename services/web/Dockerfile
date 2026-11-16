@@ -16,7 +16,7 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
-    PORT=4321
+    PORT=8080
 
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
@@ -28,5 +28,5 @@ ENV PROTO_PATH=/app/proto/lirify.proto
 RUN addgroup -S lirify && adduser -S lirify -G lirify && chown -R lirify:lirify /app
 USER lirify
 
-EXPOSE 4321
+EXPOSE 8080
 CMD ["node", "./dist/server/entry.mjs"]
