@@ -134,12 +134,17 @@ Cloud Run gives 2M requests, 360k GiB-s and 180k vCPU-s per month. The stack
 pins `min_instances = 0`, `max_instances = 1`, `cpu = 1`, `cpu_idle = true`.
 
 The binding constraint is memory: 512 MiB must hold the TF-IDF matrix
-(`vocabulary × songs` float32) and up to five `songs²` float32 matrices. At
-N = 1000 that is roughly 20 MB of matrices plus the vocabulary, which leaves room
-for the lyric cache and provider responses. `MAX_INDEXED_SONGS` defaults to 1000
-and the matrix worker refuses to commit beyond it with a clear error instead of
-being OOM-killed mid-batch. Local compose sets `-1` (unlimited) because the host
-has memory to spare.
+(`vocabulary × songs` float32) and up to five `songs²` float32 matrices.
+`build_index` keeps a single float32 matrix and converts counts → TF → TF-IDF →
+unit-normalised rows in place (it previously held four copies). Measured peak
+RSS: **1000 songs ≈ 227 MB**, 1661 songs ≈ 401 MB, against 504 MB for 1000 songs
+before the rewrite — which is why the old code could not boot on Cloud Run.
+
+`MAX_INDEXED_SONGS` defaults to 1000 and now bounds two things: `load_state`
+hydrates only the newest N songs (the rest stay in Atlas, `stats.storage.catalog_songs`
+reports the total), and a commit that would exceed N fails with
+`Index capacity guard` instead of being OOM-killed mid-batch. Local compose sets
+`-1` (unlimited) because the host has memory to spare.
 
 Two independent quotas protect the public surface:
 

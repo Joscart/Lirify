@@ -146,7 +146,7 @@ STATE: Dict[str, Any] = {
     "ids": [],
     "index": {},
     "vocab": [],
-    "counts": None,
+    "doc_freq": None,
     "tfidf": None,
     "matrices": {},
     "build": {},
@@ -482,22 +482,30 @@ def build_index(songs: List[Dict[str, Any]]):
             index.setdefault(word, {}).setdefault(str(doc), []).append(pos + 1)
 
     vocab = sorted(index)
-    counts = np.zeros((len(vocab), len(songs)), dtype=np.float32)
+    # One float32 matrix is enough: term counts are converted to TF in place, then
+    # scaled by IDF in place, then normalised in place. The previous version held
+    # counts + tf + tfidf + unit at once, which cost ~4x the memory and pushed a
+    # 512 MiB Cloud Run container into OOM territory at ~1000 songs.
+    tfidf = np.zeros((len(vocab), len(songs)), dtype=np.float32)
     for row, term in enumerate(vocab):
         for doc, positions in index[term].items():
-            counts[row, int(doc)] = len(positions)
+            tfidf[row, int(doc)] = len(positions)
 
-    # TF-IDF with log-normalised term frequency
-    tf = np.zeros_like(counts)
-    mask = counts > 0
-    tf[mask] = np.log10(counts[mask]) + 1.0
-    doc_freq = counts.astype(bool).sum(axis=1)
+    positive = tfidf > 0
+    doc_freq = positive.sum(axis=1).astype(np.int32)
     docs = max(len(songs), 1)
-    idf = np.log10(docs / np.where(doc_freq == 0, 1, doc_freq))
-    tfidf = tf * idf[:, None]
+    idf = np.log10(docs / np.where(doc_freq == 0, 1, doc_freq)).astype(np.float32)
+
+    # log-normalised TF, in place
+    tfidf[positive] = np.log10(tfidf[positive]) + 1.0
+    # TF-IDF, in place
+    tfidf *= idf[:, None]
+    # L2 normalisation, in place
     norms = np.linalg.norm(tfidf, axis=0)
     norms[norms == 0] = 1.0
-    tfidf_unit = tfidf / norms
+    tfidf /= norms
+    tfidf_unit = tfidf
+    counts = doc_freq  # kept in the tuple slot for callers; vocab-sized, not vocab x songs
 
     n = len(songs)
 
@@ -581,8 +589,9 @@ def build_vectors(songs: List[Dict[str, Any]]):
 
 def load_state() -> None:
     """Hydrate the in-process index from MongoDB. Runs once per cold start."""
+    load_limit = MAX_INDEXED_SONGS if MAX_INDEXED_SONGS >= 0 else None
     try:
-        stored = STORE.load_songs()
+        stored = STORE.load_songs(limit=load_limit)
     except Exception as exc:  # pragma: no cover - Atlas unreachable
         print(f"[lirify] could not load songs from {STORE.backend}: {exc}", flush=True)
         return
@@ -616,13 +625,19 @@ def load_state() -> None:
         )
     if not songs:
         return
+    if load_limit is not None and len(stored) > len(songs):
+        print(
+            f"[lirify] loaded {len(songs)} of {len(stored)} songs "
+            f"(MAX_INDEXED_SONGS={MAX_INDEXED_SONGS})",
+            flush=True,
+        )
     index, vocab, counts, tfidf, names, artists, langs, tokens, matrices, build = build_index(songs)
     STATE.update(
         songs=songs,
         ids=[s["video_id"] for s in songs],
         index=index,
         vocab=vocab,
-        counts=counts,
+        doc_freq=counts,
         tfidf=tfidf,
         matrices=matrices,
         build=build,
@@ -958,7 +973,7 @@ async def stage_matrix(batch: Dict[str, Any]) -> None:
                 ids=[s["video_id"] for s in combined],
                 index=index_data,
                 vocab=vocab,
-                counts=counts,
+                doc_freq=counts,
                 tfidf=tfidf,
                 matrices=matrices,
                 build=build,
@@ -1605,6 +1620,7 @@ def stats():
             "vectors": VECTORS.backend,
             "stateless": True,
             "max_indexed_songs": MAX_INDEXED_SONGS,
+            "catalog_songs": STORE.count_songs(),
         },
         "limits": {
             "public_read_per_minute": PUBLIC_RATE_LIMIT,
@@ -1641,9 +1657,11 @@ def matrices():
 def _search_scores(query: str) -> np.ndarray:
     vocab = STATE.get("vocab") or []
     index = STATE.get("index") or {}
-    counts = STATE.get("counts")
-    if not vocab or counts is None:
-        return np.array([])
+    doc_freq = STATE.get("doc_freq")
+    if not vocab or doc_freq is None:
+        # Partially built state: return a correctly sized zero vector instead of
+        # an empty one, so callers can index by song position safely.
+        return np.zeros(len(STATE.get("songs") or []), dtype=np.float32)
     q_tokens = normalize_lyrics(query, "en")
     q_counts = np.zeros(len(vocab), dtype=np.float32)
     pos = {term: i for i, term in enumerate(vocab)}
@@ -1651,12 +1669,12 @@ def _search_scores(query: str) -> np.ndarray:
         if token in pos:
             q_counts[pos[token]] += 1
     if not q_counts.any():
-        return np.zeros(counts.shape[1])
+        return np.zeros(len(STATE.get("songs") or []), dtype=np.float32)
     tf = np.zeros_like(q_counts)
     mask = q_counts > 0
     tf[mask] = np.log10(q_counts[mask]) + 1.0
-    docs = max(counts.shape[1], 1)
-    df = counts.astype(bool).sum(axis=1)
+    docs = max(len(STATE.get("songs") or []), 1)
+    df = doc_freq
     idf = np.log10(docs / np.where(df == 0, 1, df))
     q = tf * idf
     norm = np.linalg.norm(q)

@@ -324,7 +324,7 @@ versions. Cloud Run `max_instances = 1` prevents runaway scaling.
 | `stats` shows `storage.tracks = memory` | `MONGODB_URI` not injected | Check the Secret Manager version exists and the revision has the env var. |
 | Recommendations always empty | Qdrant unreachable or empty | `storage.vectors` must be `qdrant`; the service backfills vectors on boot. |
 | Index job fails with `bot_check` | YouTube anti-bot challenge on the Cloud Run egress | Retry later, or pass cookies to yt-dlp via a custom image. |
-| Index job fails: `Index capacity guard` | `MAX_INDEXED_SONGS` (default 1000) reached | Raise the limit **and** memory, or prune the library. `-1` disables the guard (local only). |
+| Index job fails: `Index capacity guard` | `MAX_INDEXED_SONGS` (default 1000) reached | The service serves the newest 1000 songs; raise the limit **and** memory, or prune. Measured: 1000 songs ≈ 227 MB RSS, 1661 ≈ 401 MB. `-1` disables the guard (local only). |
 | Certificate stays `Provisioning` | DNS missing/typo'd (check the double-i host) | Fix DNS; re-check `gcloud run domain-mappings describe`. |
 | Atlas `bad auth : Authentication failed` | `authSource` points at the app database, but Atlas users live in `admin` | Append `?authSource=admin` to `MONGODB_URI` (and `MONGO_ROOT_URI`). |
 | Atlas connection timeouts | Network Access missing `0.0.0.0/0` | Add it in Atlas → Network Access. |

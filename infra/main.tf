@@ -246,9 +246,12 @@ resource "google_cloud_run_v2_service" "python" {
         failure_threshold     = 24
       }
 
-      # gRPC streams hold long-lived connections; probe over TCP, not HTTP/1.1.
+      # Cloud Run does not support TCP sockets in *liveness* probes (only in
+      # startup probes). The container's Caddy mux answers HTTP GET on /health
+      # from uvicorn, so probe that instead of the gRPC channel.
       liveness_probe {
-        tcp_socket {
+        http_get {
+          path = "/health"
           port = 8080
         }
         period_seconds    = 60

@@ -134,7 +134,11 @@ class Store:
     backend = "abstract"
 
     # --- songs / index ----------------------------------------------------
-    def load_songs(self) -> List[Dict[str, Any]]:
+    def load_songs(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Return committed songs, optionally capped to the newest ``limit`` rows."""
+        raise NotImplementedError
+
+    def count_songs(self) -> int:
         raise NotImplementedError
 
     def commit_songs(self, songs: List[Dict[str, Any]], build: Dict[str, Any]) -> int:
@@ -292,10 +296,23 @@ class MongoStore(Store):
             return False
 
     # -- songs ------------------------------------------------------------
-    def load_songs(self) -> List[Dict[str, Any]]:
+    def load_songs(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
-        cursor = self.db[COLLECTIONS["songs"]].find({}).sort("createdAt", 1)
-        for doc in cursor:
+        # Without a cap, oldest-first keeps document ids stable. With a cap, take
+        # the newest N (recent playlist additions stay visible) and restore the
+        # ascending order afterwards.
+        if limit is not None and limit > 0:
+            cursor = (
+                self.db[COLLECTIONS["songs"]]
+                .find({})
+                .sort("createdAt", self._desc)
+                .limit(limit)
+            )
+            docs = list(cursor)
+            docs.reverse()
+        else:
+            docs = list(self.db[COLLECTIONS["songs"]].find({}).sort("createdAt", 1))
+        for doc in docs:
             out.append(
                 {
                     "video_id": doc.get("videoId", ""),
@@ -309,6 +326,9 @@ class MongoStore(Store):
                 }
             )
         return out
+
+    def count_songs(self) -> int:
+        return int(self.db[COLLECTIONS["songs"]].count_documents({}))
 
     def commit_songs(self, songs: List[Dict[str, Any]], build: Dict[str, Any]) -> int:
         from pymongo import UpdateOne
@@ -644,8 +664,14 @@ class MemoryStore(Store):
     def ping(self) -> bool:
         return True
 
-    def load_songs(self) -> List[Dict[str, Any]]:
-        return [dict(doc) for doc in self._songs.values()]
+    def load_songs(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        docs = [dict(doc) for doc in self._songs.values()]
+        if limit is not None and limit > 0:
+            docs = docs[-limit:]
+        return docs
+
+    def count_songs(self) -> int:
+        return len(self._songs)
 
     def commit_songs(self, songs: List[Dict[str, Any]], build: Dict[str, Any]) -> int:
         changed = 0
