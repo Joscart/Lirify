@@ -110,10 +110,13 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 - **Never prune from a capped load.** A replica that hydrates a subset must not
   delete the rows it did not read — that is how 661 songs were once lost.
   `prune_songs` is an explicit operation, not a boot side effect.
-- Every commit bumps `index_stats.revision`. Running instances compare it every
-  `INDEX_REFRESH_SECONDS` (60s) and re-hydrate when it moved, which is what makes
-  local indexing visible to Cloud Run; `POST /admin/reload` (bot bearer) forces it
-  immediately and `scripts/sync_with_cloud.py` drives both.
+- Every commit bumps `index_stats.revision`. Instances check it on each inbound
+  request (throttled to `INDEX_CHECK_SECONDS`, default 10) and re-hydrate in a
+  background task when it moved; a 60s poller also runs while the instance is
+  warm. Cloud Run freezes background work between requests, so the request-time
+  check is what actually makes local indexing visible to the cloud.
+  `POST /admin/reload` (bot bearer) forces a synchronous reload and
+  `scripts/sync_with_cloud.py` drives both.
 - The public REST surface is rate limited per IP (`PUBLIC_RATE_LIMIT_PER_MINUTE`,
   in-process limiter in `main.py`); the bot write path is limited per API key via
   MongoDB so the quota survives cold starts. Both accept `0` = unlimited.

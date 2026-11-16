@@ -71,8 +71,13 @@ REFRESH_INTERVAL = int(os.environ.get("INDEX_REFRESH_SECONDS", "60"))
 # poller can be frozen indefinitely. Any inbound request also checks the shared
 # revision (at most once per INDEX_CHECK_SECONDS) and re-hydrates if it moved.
 FRESHNESS_CHECK_SECONDS = float(os.environ.get("INDEX_CHECK_SECONDS", "10"))
+# Blocking reload makes the triggering request pay the rebuild cost (and can time
+# out); the default schedules it instead, so that request answers from the
+# previous snapshot and the next one is fresh.
+RELOAD_BLOCKING = os.environ.get("INDEX_RELOAD_BLOCKING", "0") == "1"
 _LAST_REV_CHECK = 0.0
 _RELOAD_LOCK = asyncio.Lock()
+_RELOAD_TASK: "asyncio.Task[None] | None" = None
 
 app = FastAPI(title="Lirify API", version="1.0.0")
 app.add_middleware(
@@ -1077,30 +1082,43 @@ async def enqueue_playlist(url: str, limit: Optional[int] = None, source: str = 
     return job_id
 
 
-async def ensure_fresh_index() -> None:
-    """Reload the index if another instance committed since we loaded it.
+async def _reload_index(revision: int) -> None:
+    global STATE_REV
+    async with _RELOAD_LOCK:
+        if revision <= STATE_REV:
+            return
+        print(f"[lirify] index revision {revision} > {STATE_REV}; reloading", flush=True)
+        try:
+            await asyncio.to_thread(load_state)
+        except Exception as exc:  # pragma: no cover - Atlas hiccup
+            print(f"[lirify] reload failed: {exc}", flush=True)
 
-    Cheap path: one indexed lookup on `index_stats` at most every
-    INDEX_CHECK_SECONDS. Expensive path (only on a real change): rebuild STATE,
-    which takes a few seconds for a few thousand songs. Serialised by a lock so
-    concurrent requests cannot stampede.
+
+async def ensure_fresh_index() -> None:
+    """Notice that another instance committed, at most every INDEX_CHECK_SECONDS.
+
+    Cheap path: one indexed lookup on `index_stats`. On a real change the reload
+    is scheduled in the background by default, so the request that discovered the
+    change is not penalised by a multi-second index rebuild (Cloud Run aborts
+    requests that stall, and a rebuild for a few thousand songs takes seconds).
     """
-    global _LAST_REV_CHECK
+    global _LAST_REV_CHECK, _RELOAD_TASK
     now = time.monotonic()
     if FRESHNESS_CHECK_SECONDS > 0 and now - _LAST_REV_CHECK < FRESHNESS_CHECK_SECONDS:
         return
     _LAST_REV_CHECK = now
+    if _RELOAD_TASK is not None and not _RELOAD_TASK.done():
+        return
     try:
         revision = await asyncio.to_thread(STORE.stats_revision)
     except Exception:
         return
     if revision <= STATE_REV:
         return
-    async with _RELOAD_LOCK:
-        if revision <= STATE_REV:
-            return
-        print(f"[lirify] index revision {revision} > {STATE_REV}; reloading on request", flush=True)
-        await asyncio.to_thread(load_state)
+    if RELOAD_BLOCKING:
+        await _reload_index(revision)
+    else:
+        _RELOAD_TASK = asyncio.create_task(_reload_index(revision))
 
 
 async def _finish_failed_playlist(job_id: str, reason: str) -> None:
