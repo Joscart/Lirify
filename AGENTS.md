@@ -160,6 +160,10 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   (`npm run preview`) no longer apply; use `npm run build && npm start`.
 - Cloud Run reserves `PORT` (and the `K_*`/`CLOUD_RUN_*` names): never declare
   them in `infra/main.tf`. The images default to 8080 and read the injected value.
+- Domain mappings need the registrable domain verified by a project owner
+  (`gcloud domains verify joscart.win`) *and* the Cloudflare records set to
+  **DNS only**; a proxied CNAME blocks managed-certificate issuance. The deploy
+  job preflights verification when `ENABLE_DOMAIN_MAPPINGS=true`.
 - The `*.run.app` edge intercepts `/healthz` and returns Google's own 404 page, so
   it is unusable as a public health path. All three services expose `/health`
   (go-webui also keeps `/healthz` for container-local probes) and `/readyz`.

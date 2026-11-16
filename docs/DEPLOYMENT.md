@@ -231,59 +231,65 @@ aborting so gRPC status codes survive the in-container h2c mux.
 
 ## 9. Custom domains and managed certificates
 
-Cloud Run domain mappings only work for domains **verified in Google Search
-Console** by an owner of the GCP project.
+`joscart.win` is registered at Cloudflare (`bob.ns.cloudflare.com`,
+`maleah.ns.cloudflare.com`) but currently publishes **no records**, so nothing
+resolves yet. Domain mappings also require the domain to be **verified** by an
+owner of the GCP project; without that the Terraform apply fails.
 
-1. Verify ownership of `joscart.win`:
+Order matters:
+
+1. **Create the zone.** Cloudflare dashboard → Add site → `joscart.win` → keep the
+   assigned nameservers. The zone must be active.
+2. **Verify ownership once, in GCP:**
 
    ```bash
    gcloud domains verify joscart.win
    ```
 
-   Follow the browser flow (Search Console → add the domain → TXT record).
-2. Deploy with mappings enabled (either set the `ENABLE_DOMAIN_MAPPINGS` variable to
-   `true` and re-run the workflow, or dispatch the workflow with
-   `enable_domain_mappings: true`).
-3. Read the exact records Terraform created:
+   It prints a TXT record (`google-site-verification=…`). Add it at Cloudflare as
+   **DNS only** (grey cloud, not proxied). Verifying the apex covers every
+   subdomain, so `lirify.` and `index.lirify.` need nothing extra.
+3. **Enable the mappings** — repository/environment variable on `Lirify`:
+
+   ```bash
+   gh variable set ENABLE_DOMAIN_MAPPINGS --env Lirify --body true
+   gh workflow run deploy.yml        # or push to main
+   ```
+
+   The deploy job now preflights `gcloud domains list-user-verified` and fails
+   with the commands above if verification is missing, instead of a generic
+   provider error minutes later.
+4. **Read the exact records** from the run's job summary (*Lirify deploy* →
+   `- web DNS: …`, `- index DNS: …`), or locally:
 
    ```bash
    cd infra
-   terraform init -backend-config="bucket=YOUR_STATE_BUCKET" -backend-config="prefix=lirify/state"
+   terraform init -backend-config="bucket=lirify-514907-lirify-tfstate" -backend-config="prefix=lirify/state"
    terraform output web_domain_dns_records
    terraform output index_domain_dns_records
    ```
 
-   Each entry is `{type, name, value}`. Typical output:
-
-   | Host | Type | Name | Value |
-   | --- | --- | --- | --- |
-   | `lirify.joscart.win` | `CNAME` | `lirify` | `ghs.googlehosted.com.` |
-   | `index.lirify.joscart.win` | `CNAME` | `index` | `ghs.googlehosted.com.` |
-   | apex (`joscart.win`) | `A` / `AAAA` | `@` | `216.239.32.21` … |
-
-   Add them at your DNS provider exactly as printed. CNAMEs must not be
-   proxied/ flattened by a CDN in a way that hides the target.
-4. Wait for the certificate:
+   Typical result: a `CNAME` per subdomain pointing at `ghs.googlehosted.com.`
+5. **Add them at Cloudflare as DNS only.** The orange-cloud proxy must be off for
+   these records: a proxied CNAME terminates TLS at Cloudflare, so Google cannot
+   validate the domain and the managed certificate never issues.
+6. **Wait for the certificate**, then check:
 
    ```bash
    gcloud run domain-mappings describe --domain lirify.joscart.win --region us-central1
-   ```
-
-   The `CertificateProvisioned` and `Ready` conditions become `True` once DNS has
-   propagated and Google issues the certificate (usually 15–60 minutes).
-5. Confirm HTTPS:
-
-   ```bash
+   ./scripts/check_domains.sh          # DNS, cert issuer (must be Google Trust), HTTP 200
    curl -sI https://lirify.joscart.win | head -3
-   curl -sI https://index.lirify.joscart.win | head -3
    ```
 
-> Production alternative: Google recommends an external Application Load Balancer
-> with a Serverless NEG instead of domain mappings. It gives you one IP, Cloud
-> Armor and managed certificates with DNS authorization. Domain mapping is used
-> here because it is free and needs no load balancer.
+   `CertificateProvisioned` and `Ready` must both be `True`. Issuance usually
+   takes 15–60 minutes after DNS resolves.
 
----
+The services keep using their `*.run.app` URLs for server-to-server traffic
+(`PYTHON_BACKEND_URL`, `GRPC_TARGET`); only browsers use the custom domains.
+
+> Production alternative: an external Application Load Balancer with a Serverless
+> NEG gives one IP, Cloud Armor and certificates with DNS authorization. Domain
+> mapping is used here because it is free and needs no load balancer.
 
 ## 10. Day-2 operations
 
