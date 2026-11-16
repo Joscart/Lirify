@@ -233,15 +233,18 @@ resource "google_cloud_run_v2_service" "python" {
         }
       }
 
-      # A cold start has to open Atlas + Qdrant connections and rebuild the index.
+      # Caddy binds the port before uvicorn is ready, so a TCP probe would let
+      # traffic in while /health still returns 502. Probe the real endpoint: a
+      # cold start has to open Atlas + Qdrant and rebuild the index first.
       startup_probe {
-        tcp_socket {
+        http_get {
+          path = "/health"
           port = 8080
         }
         initial_delay_seconds = 5
         period_seconds        = 5
-        timeout_seconds       = 3
-        failure_threshold     = 24
+        timeout_seconds       = 5
+        failure_threshold     = 36
       }
 
       # Cloud Run does not support TCP sockets in *liveness* probes (only in

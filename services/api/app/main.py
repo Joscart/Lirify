@@ -1385,9 +1385,14 @@ async def start_workers() -> None:
     global GRPC_SERVER
     if os.environ.get("GRPC_INPROCESS", "1") != "0" and GRPC_SERVER is None:
         # One process = one index. The Caddy mux still fronts both protocols.
-        import grpc_server
+        # A failure here must not take REST down with it: report it and keep the
+        # HTTP surface (and /health) alive.
+        try:
+            import grpc_server
 
-        GRPC_SERVER = await grpc_server.start_server()
+            GRPC_SERVER = await grpc_server.start_server()
+        except Exception as exc:  # pragma: no cover - port/bind problems
+            print(f"[lirify] gRPC server failed to start: {exc}", flush=True)
     if not WORKERS:
         await recover_queue()
         WORKERS.append(asyncio.create_task(reconcile_vectors()))
