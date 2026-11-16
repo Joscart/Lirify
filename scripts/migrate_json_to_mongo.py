@@ -116,6 +116,12 @@ def migrate(data_dir: Path, dry_run: bool, limit: Optional[int]) -> Dict[str, in
         if ops and not dry_run:
             result = db["songs"].bulk_write(ops, ordered=False)
             counts["songs"] = int(result.upserted_count + result.modified_count)
+            if counts["songs"]:
+                # Tell running replicas (Cloud Run) that their in-memory index is
+                # stale; they reload within INDEX_REFRESH_SECONDS.
+                db["index_stats"].update_one(
+                    {"_id": "global"}, {"$inc": {"revision": 1}}, upsert=True
+                )
         else:
             counts["songs"] = len(ops)
         print(f"songs:        {counts['songs']} {'would be ' if dry_run else ''}upserted")

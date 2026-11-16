@@ -197,6 +197,15 @@ class Store:
     def stats_get(self) -> Dict[str, Any]:
         raise NotImplementedError
 
+    def stats_revision(self) -> int:
+        """Monotonic counter bumped on every committed batch.
+
+        Instances compare it with the revision they loaded to decide whether their
+        in-memory index is stale (local indexing writes to the shared Atlas/Qdrant
+        state, so the cloud instance must notice).
+        """
+        raise NotImplementedError
+
     def stats_put(self, build: Dict[str, Any]) -> None:
         raise NotImplementedError
 
@@ -338,6 +347,10 @@ class MongoStore(Store):
     def count_songs(self) -> int:
         return int(self.db[COLLECTIONS["songs"]].count_documents({}))
 
+    def stats_revision(self) -> int:
+        doc = self.db[COLLECTIONS["stats"]].find_one({"_id": "global"}, {"revision": 1})
+        return int((doc or {}).get("revision", 0))
+
     def commit_songs(self, songs: List[Dict[str, Any]], build: Dict[str, Any]) -> int:
         from pymongo import UpdateOne
 
@@ -373,6 +386,11 @@ class MongoStore(Store):
             return 0
         result = self.db[COLLECTIONS["songs"]].bulk_write(ops, ordered=False)
         self.stats_put(build)
+        # Bumping the revision is what tells other replicas their cached index is
+        # stale; it is incremented once per committed batch, not per song.
+        self.db[COLLECTIONS["stats"]].update_one(
+            {"_id": "global"}, {"$inc": {"revision": 1}}, upsert=True
+        )
         return int(result.upserted_count + result.modified_count)
 
     def prune_songs(self, keep_ids: Iterable[str]) -> int:
@@ -666,6 +684,7 @@ class MemoryStore(Store):
         self._jobs: Dict[str, Dict[str, Any]] = {}
         self._stashes: Dict[str, Dict[str, Any]] = {}
         self._stats: Dict[str, Any] = {}
+        self._revision = 0
         self._durations: Dict[str, float] = {}
         self._rate: Dict[str, Dict[str, Any]] = {}
         self._idem: Dict[str, str] = {}
@@ -701,6 +720,8 @@ class MemoryStore(Store):
             if self._songs.get(video_id) != doc:
                 changed += 1
             self._songs[video_id] = doc
+        if changed:
+            self._revision += 1
         self._stats = dict(build)
         return changed
 
@@ -786,6 +807,9 @@ class MemoryStore(Store):
 
     def stats_get(self) -> Dict[str, Any]:
         return dict(self._stats)
+
+    def stats_revision(self) -> int:
+        return self._revision
 
     def stats_put(self, build: Dict[str, Any]) -> None:
         self._stats = dict(build)

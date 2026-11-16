@@ -102,12 +102,18 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   after a randomised delay. `MAX_JOB_ATTEMPTS` (default 8) and
   `RETRY_INTERVAL_SECONDS` (default 300) now bound matrix-commit retries and
   failed-song lyric retries only.
-- `MAX_INDEXED_SONGS` (default 1000) bounds both sides: `load_state` hydrates
-  only the newest N songs, and a commit that would exceed N fails with
-  `Index capacity guard` instead of OOM-killing the revision. `-1` disables it
-  (local compose only). Measured peak RSS after the in-place TF-IDF rewrite:
-  1000 songs ≈ 227 MB, 1661 ≈ 401 MB — the old implementation needed 504 MB for
-  1000 and could not boot on Cloud Run.
+- `MAX_INDEXED_SONGS` (default 3000 with `python_memory = 1Gi`) bounds both
+  sides: `load_state` hydrates only the newest N songs, and a commit that would
+  exceed N fails with `Index capacity guard` instead of OOM-killing the
+  revision. `-1` disables it (local compose). Measured peak RSS after the
+  in-place TF-IDF rewrite: 1000 songs ≈ 227 MB, 1661 ≈ 401 MB.
+- **Never prune from a capped load.** A replica that hydrates a subset must not
+  delete the rows it did not read — that is how 661 songs were once lost.
+  `prune_songs` is an explicit operation, not a boot side effect.
+- Every commit bumps `index_stats.revision`. Running instances compare it every
+  `INDEX_REFRESH_SECONDS` (60s) and re-hydrate when it moved, which is what makes
+  local indexing visible to Cloud Run; `POST /admin/reload` (bot bearer) forces it
+  immediately and `scripts/sync_with_cloud.py` drives both.
 - The public REST surface is rate limited per IP (`PUBLIC_RATE_LIMIT_PER_MINUTE`,
   in-process limiter in `main.py`); the bot write path is limited per API key via
   MongoDB so the quota survives cold starts. Both accept `0` = unlimited.

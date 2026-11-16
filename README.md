@@ -161,6 +161,21 @@ accumulative; duplicates are skipped per track. `MAX_INDEXED_SONGS` defaults to
 - A first visit renders an onboarding gate: one search is required before
   personalised shelves are fetched.
 
+## Local ↔ cloud parity
+
+Both stacks write to the same Atlas + Qdrant, so there is one dataset and each
+process only holds a snapshot. `MAX_INDEXED_SONGS=-1` locally and `3000` in the
+cloud means both serve the whole catalogue.
+
+```bash
+python3 scripts/sync_with_cloud.py parity      # local vs cloud counts
+python3 scripts/sync_with_cloud.py index "<playlist url>"   # index locally, then reload cloud
+python3 scripts/sync_with_cloud.py reload      # force cloud re-hydrate
+```
+
+Running instances also poll `index_stats.revision` every `INDEX_REFRESH_SECONDS`
+(60s), so a batch committed locally appears in the cloud without any action.
+
 ## Deployment
 
 Push to `main`. GitHub Actions verifies the contract and builds

@@ -66,9 +66,14 @@ variable "enable_domain_mappings" {
 # --- free-tier tuning ------------------------------------------------------
 
 variable "python_memory" {
-  description = "Memory for python-backend. 512Mi fits the TF-IDF index guard; lower it to 256Mi only for tiny indexes."
+  description = <<-EOT
+    Memory for python-backend. The in-process TF-IDF index needs ~400 MB for
+    ~1700 songs and ~800 MB for ~4000; 1Gi keeps the whole catalogue servable
+    while remaining inside the Cloud Run free GiB-second allowance for
+    scale-to-zero usage.
+  EOT
   type        = string
-  default     = "512Mi"
+  default     = "1Gi"
 }
 
 variable "python_cpu" {
@@ -176,13 +181,21 @@ variable "bot_check_retry_max_seconds" {
   default     = 7200
 }
 
+variable "index_refresh_seconds" {
+  description = "How often a running instance compares the shared index revision and reloads. 0 disables."
+  type        = number
+  default     = 60
+}
+
 variable "max_indexed_songs" {
   description = <<-EOT
-    Capacity guard for the in-process TF-IDF index (512Mi container).
-    Default 1000. Set -1 for unlimited — only on a memory-rich local stack.
+    Capacity guard for the in-process TF-IDF index. Default 3000 covers a
+    ~1700-song catalogue with headroom at 1Gi. Set -1 for unlimited — only on a
+    memory-rich local stack. Raising this without raising python_memory will
+    OOM-kill the revision.
   EOT
   type        = number
-  default     = 1000
+  default     = 3000
 }
 
 variable "max_job_attempts" {

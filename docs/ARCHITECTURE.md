@@ -140,11 +140,22 @@ unit-normalised rows in place (it previously held four copies). Measured peak
 RSS: **1000 songs ≈ 227 MB**, 1661 songs ≈ 401 MB, against 504 MB for 1000 songs
 before the rewrite — which is why the old code could not boot on Cloud Run.
 
-`MAX_INDEXED_SONGS` defaults to 1000 and now bounds two things: `load_state`
-hydrates only the newest N songs (the rest stay in Atlas, `stats.storage.catalog_songs`
-reports the total), and a commit that would exceed N fails with
-`Index capacity guard` instead of being OOM-killed mid-batch. Local compose sets
-`-1` (unlimited) because the host has memory to spare.
+`MAX_INDEXED_SONGS` defaults to 3000 (with `python_memory = 1Gi`) and bounds two
+things: `load_state` hydrates only the newest N songs (the rest stay in Atlas,
+`stats.storage.catalog_songs` reports the total), and a commit that would exceed N
+fails with `Index capacity guard` instead of being OOM-killed mid-batch. Local
+compose sets `-1` (unlimited) because the host has memory to spare.
+
+A capped load **never prunes**: deleting the rows a replica did not read would
+destroy the shared catalogue.
+
+### Cross-replica consistency
+
+Atlas and Qdrant are the only sources of truth, and both local compose and Cloud
+Run write to them. Each commit bumps `index_stats.revision`; instances compare it
+every `INDEX_REFRESH_SECONDS` (default 60) and re-hydrate when it changes, so a
+playlist indexed locally becomes visible in the cloud without a redeploy.
+`POST /admin/reload` forces it immediately.
 
 Two independent quotas protect the public surface:
 

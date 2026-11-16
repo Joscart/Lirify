@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import requests
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -62,6 +62,11 @@ WORKERS: List[asyncio.Task] = []
 GRPC_SERVER = None
 GRPC_ERROR = ""
 MONGO_ERROR = ""
+# Revision of the index this process has in memory. Compared against the shared
+# revision so an instance notices writes made by another one (e.g. local compose
+# indexing into the same Atlas/Qdrant).
+STATE_REV = 0
+REFRESH_INTERVAL = int(os.environ.get("INDEX_REFRESH_SECONDS", "60"))
 
 app = FastAPI(title="Lirify API", version="1.0.0")
 app.add_middleware(
@@ -653,11 +658,22 @@ def load_state() -> None:
         vectors=build_vectors(songs) if VECTORS.backend == "none" else None,
     )
     try:
-        STORE.prune_songs([s["video_id"] for s in songs])
+        # NEVER prune from a capped load: with MAX_INDEXED_SONGS a replica hydrates
+        # a subset, and deleting everything else would destroy the shared
+        # catalogue (this is exactly how 661 songs disappeared). Pruning is an
+        # explicit operational action, not a side effect of booting.
         STORE.stats_put(build)
     except Exception as exc:  # pragma: no cover
         print(f"[lirify] index reconciliation failed: {exc}", flush=True)
-    print(f"[lirify] loaded {len(songs)} songs from {STORE.backend}", flush=True)
+    global STATE_REV
+    try:
+        STATE_REV = STORE.stats_revision()
+    except Exception:
+        STATE_REV = 0
+    print(
+        f"[lirify] loaded {len(songs)} songs from {STORE.backend} (rev {STATE_REV})",
+        flush=True,
+    )
 
 
 load_state()
@@ -1086,6 +1102,28 @@ async def _finish_failed_playlist(job_id: str, reason: str) -> None:
     )
 
 
+async def index_refresh_worker() -> None:
+    """Reload the index when another instance commits to the shared database.
+
+    Local compose writes to the same Atlas + Qdrant as Cloud Run. Without this,
+    a running cloud replica would keep serving its boot-time snapshot.
+    """
+    if REFRESH_INTERVAL <= 0:
+        return
+    while True:
+        await asyncio.sleep(REFRESH_INTERVAL)
+        try:
+            revision = await asyncio.to_thread(STORE.stats_revision)
+        except Exception:
+            continue
+        if revision > STATE_REV:
+            print(
+                f"[lirify] index revision {revision} > {STATE_REV}; reloading from {STORE.backend}",
+                flush=True,
+            )
+            await asyncio.to_thread(load_state)
+
+
 async def index_worker() -> None:
     """Scrapes queued playlists and stashes their inverted indexes."""
     while True:
@@ -1405,6 +1443,7 @@ async def start_workers() -> None:
         WORKERS.append(asyncio.create_task(index_worker()))
         WORKERS.append(asyncio.create_task(matrix_worker()))
         WORKERS.append(asyncio.create_task(retry_worker()))
+        WORKERS.append(asyncio.create_task(index_refresh_worker()))
         WORKERS.append(asyncio.create_task(queue_state_worker()))
 
 
@@ -1598,6 +1637,34 @@ def cache_status():
         "retry_interval_seconds": RETRY_INTERVAL,
         "storage": STORE.backend,
         "failed": list(failed.values())[:100],
+    }
+
+
+@app.post("/admin/reload")
+async def admin_reload(request: Request):
+    """Re-hydrate the in-memory index from Atlas (bot bearer token required).
+
+    Called by scripts/sync_with_cloud.py after a local indexing run so the cloud
+    replica serves the new tracks immediately instead of waiting for the poll.
+    """
+    expected = (os.environ.get("BOT_INGEST_API_KEY") or "").strip()
+    if not expected:
+        raise HTTPException(503, "BOT_INGEST_API_KEY is not configured")
+    import hmac
+
+    header = request.headers.get("authorization", "")
+    token = header.split(" ", 1)[1].strip() if header.lower().startswith("bearer ") else ""
+    if not hmac.compare_digest(token, expected):
+        raise HTTPException(401, "Invalid bearer token")
+
+    before = len(STATE["songs"])
+    await asyncio.to_thread(load_state)
+    return {
+        "reloaded": True,
+        "songs_before": before,
+        "songs_after": len(STATE["songs"]),
+        "catalog_songs": STORE.count_songs(),
+        "revision": STATE_REV,
     }
 
 

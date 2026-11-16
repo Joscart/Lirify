@@ -53,7 +53,7 @@ Work top to bottom. Steps 1–6 are one-time. Steps 7–10 are the first deploy.
 
 > **Free-tier guardrails** you get from `infra/`: `us-central1`, Cloud Run
 > `min_instances = 0`, `max_instances = 1` per service, `cpu = 1`,
-> `memory = 512Mi` (python/web) / `256Mi` (go), request-based billing
+> `memory = 1Gi` (python) / `512Mi` (web) / `256Mi` (go), request-based billing
 > (`cpu_idle = true`), Artifact Registry pruning to two versions per image, and a
 > `MAX_INDEXED_SONGS` capacity guard (default 1000) so a 512 MiB container is never OOM-killed.
 
@@ -296,7 +296,7 @@ Console** by an owner of the GCP project.
 | Index a playlist as an operator | `https://index.lirify.joscart.win` → **Index now**. |
 | Index a playlist as an agent | `skills/lirify-playlist-indexer` (see `SKILL.md`). |
 | Inspect job history | Go dashboard → Queue, or `curl $API/queue`. |
-| Change capacity | Raise `MAX_INDEXED_SONGS` (default 1000) and python memory together (512Mi → 1Gi leaves the free tier). `-1` = unlimited, intended for the local compose stack. |
+| Change capacity | `MAX_INDEXED_SONGS` defaults to 3000 with `python_memory = 1Gi` (~400 MB at 1700 songs). Raise both together; `-1` = unlimited for local only. |
 | Roll back | Re-run the workflow for the previous commit, or `gcloud run services update-traffic lirify-api --to-revisions=<rev>=100`. |
 
 ### Cost safety
@@ -324,7 +324,7 @@ versions. Cloud Run `max_instances = 1` prevents runaway scaling.
 | `stats` shows `storage.tracks = memory` | `MONGODB_URI` not injected | Check the Secret Manager version exists and the revision has the env var. |
 | Recommendations always empty | Qdrant unreachable or empty | `storage.vectors` must be `qdrant`; the service backfills vectors on boot. |
 | Index job fails with `bot_check` | YouTube anti-bot challenge on the Cloud Run egress | Retry later, or pass cookies to yt-dlp via a custom image. |
-| Index job fails: `Index capacity guard` | `MAX_INDEXED_SONGS` (default 1000) reached | The service serves the newest 1000 songs; raise the limit **and** memory, or prune. Measured: 1000 songs ≈ 227 MB RSS, 1661 ≈ 401 MB. `-1` disables the guard (local only). |
+| Index job fails: `Index capacity guard` | `Index capacity guard` | The service serves the newest `MAX_INDEXED_SONGS` (default 3000); raise the limit **and** memory, or prune. Measured: 1000 songs ≈ 227 MB RSS, 1661 ≈ 401 MB. |
 | Certificate stays `Provisioning` | DNS missing/typo'd (check the double-i host) | Fix DNS; re-check `gcloud run domain-mappings describe`. |
 | Atlas `bad auth : Authentication failed` | `authSource` points at the app database, but Atlas users live in `admin` | Append `?authSource=admin` to `MONGODB_URI` (and `MONGO_ROOT_URI`). |
 | Atlas connection timeouts | Network Access missing `0.0.0.0/0` | Add it in Atlas → Network Access. |

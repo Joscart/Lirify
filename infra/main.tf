@@ -195,6 +195,12 @@ resource "google_cloud_run_v2_service" "python" {
         name  = "PUBLIC_RATE_LIMIT_PER_MINUTE"
         value = tostring(var.public_rate_limit_per_minute)
       }
+      # Instances poll the shared index revision so a batch committed elsewhere
+      # (local compose, another replica) becomes visible without a restart.
+      env {
+        name  = "INDEX_REFRESH_SECONDS"
+        value = tostring(var.index_refresh_seconds)
+      }
 
       env {
         name = "MONGODB_URI"
