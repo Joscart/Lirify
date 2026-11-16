@@ -445,8 +445,16 @@ def _install_optional_services(server: grpc_aio.Server) -> None:
         print(f"[lirify] gRPC reflection disabled: {exc}", flush=True)
 
 
-async def serve() -> None:
-    port = int(os.environ.get("GRPC_PORT", "50051"))
+async def start_server(port: int | None = None) -> "grpc_aio.Server":
+    """Create and start the gRPC server on the current event loop.
+
+    Called from the FastAPI startup hook so the REST and gRPC surfaces share one
+    process — and therefore one copy of the in-memory index. Running
+    ``python -m grpc_server`` as a second process doubles RSS (each process
+    imports ``main`` and rebuilds STATE), which cannot fit in a 512 MiB Cloud Run
+    container.
+    """
+    port = port or int(os.environ.get("GRPC_PORT", "50051"))
     server = grpc_aio.server(
         options=[
             ("grpc.max_receive_message_length", MAX_MESSAGE),
@@ -469,8 +477,19 @@ async def serve() -> None:
 
     server.add_insecure_port(f"0.0.0.0:{port}")
     await server.start()
-    print(f"[lirify] gRPC (h2c) listening on :{port}", flush=True)
+    print(f"[lirify] gRPC (h2c) listening on :{port} (in-process)", flush=True)
+    return server
 
+
+async def stop_server(server: "grpc_aio.Server | None") -> None:
+    if server is None:
+        return
+    await server.stop(grace=5)
+
+
+async def serve() -> None:
+    """Standalone gRPC server, for local development and tests."""
+    server = await start_server()
     stop = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -478,7 +497,7 @@ async def serve() -> None:
         except (NotImplementedError, RuntimeError):  # pragma: no cover - not main thread
             pass
     await stop.wait()
-    await server.stop(grace=5)
+    await stop_server(server)
 
 
 def main_entry() -> None:

@@ -56,9 +56,13 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 - `services/api/app/vector.py` is the only Qdrant access layer: deterministic
   hashed lyric embeddings, upsert/search/delete, `NullVectorStore` fallback.
 - `services/api/app/grpc_server.py` serves `lirify.v1.LirifyService` over h2c on
-  `GRPC_PORT` (50051). `Caddyfile` + `run.sh` mux one Cloud Run port: gRPC by
-  content-type to grpc.aio, everything else to uvicorn. `_abort()` sends initial
-  metadata first so gRPC status codes survive Caddy's trailers-only handling.
+  `GRPC_PORT` (50051). It starts from the FastAPI startup hook
+  (`GRPC_INPROCESS`, default on) so REST and gRPC share **one process and one copy
+  of the index**: running it standalone doubles RSS (~2 x 227 MB at 1000 songs)
+  and cannot fit a 512 MiB container. `Caddyfile` + `run.sh` mux one Cloud Run
+  port: gRPC by content-type to grpc.aio, everything else to uvicorn. `_abort()`
+  sends initial metadata first so gRPC status codes survive Caddy's trailers-only
+  handling.
 - `services/api/app/bot_api.py` is the bearer-protected `/api/v1/bot/*` router,
   including URL validation, rate limits, idempotency and error classification.
 - `services/api/app/lyrics_sources.py` holds the 9-provider Limusic fallback chain.

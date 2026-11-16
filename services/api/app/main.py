@@ -59,6 +59,7 @@ PLAYLIST_QUEUE: asyncio.Queue = asyncio.Queue()
 MATRIX_QUEUE: asyncio.Queue = asyncio.Queue()
 COMMIT_LOCK = asyncio.Lock()
 WORKERS: List[asyncio.Task] = []
+GRPC_SERVER = None
 
 app = FastAPI(title="Lirify API", version="1.0.0")
 app.add_middleware(
@@ -1381,6 +1382,12 @@ async def reconcile_vectors() -> None:
 
 @app.on_event("startup")
 async def start_workers() -> None:
+    global GRPC_SERVER
+    if os.environ.get("GRPC_INPROCESS", "1") != "0" and GRPC_SERVER is None:
+        # One process = one index. The Caddy mux still fronts both protocols.
+        import grpc_server
+
+        GRPC_SERVER = await grpc_server.start_server()
     if not WORKERS:
         await recover_queue()
         WORKERS.append(asyncio.create_task(reconcile_vectors()))
@@ -1392,9 +1399,15 @@ async def start_workers() -> None:
 
 @app.on_event("shutdown")
 async def stop_workers() -> None:
+    global GRPC_SERVER
     for task in WORKERS:
         task.cancel()
     WORKERS.clear()
+    if GRPC_SERVER is not None:
+        import grpc_server
+
+        await grpc_server.stop_server(GRPC_SERVER)
+        GRPC_SERVER = None
 
 
 @app.websocket("/ws")

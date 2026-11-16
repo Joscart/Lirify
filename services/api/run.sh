@@ -11,13 +11,12 @@ shutdown() {
 }
 trap shutdown INT TERM
 
-echo "[lirify] starting REST on :${HTTP_PORT}"
+# gRPC starts inside this process (FastAPI startup hook), so REST and gRPC share
+# one copy of the in-memory index: two processes would double RSS and cannot fit
+# in a 512 MiB Cloud Run container.
+echo "[lirify] starting REST + in-process gRPC on :${GRPC_PORT}"
 uvicorn main:app --host 127.0.0.1 --port "${HTTP_PORT}" --proxy-headers --forwarded-allow-ips='*' &
 API_PID=$!
-
-echo "[lirify] starting gRPC (h2c) on :${GRPC_PORT}"
-python -m grpc_server &
-GRPC_PID=$!
 
 echo "[lirify] starting h2c mux on :${PORT}"
 caddy run --config /etc/caddy/Caddyfile --adapter caddyfile &
