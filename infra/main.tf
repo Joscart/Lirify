@@ -332,7 +332,7 @@ resource "google_cloud_run_v2_service" "web" {
         initial_delay_seconds = 3
         period_seconds        = 5
         timeout_seconds       = 3
-        failure_threshold     = 20
+        failure_threshold     = 30
       }
 
       liveness_probe {

@@ -32,6 +32,7 @@ type templateExecutor interface {
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /", s.index)
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("GET /readyz", s.ready)
 	mux.HandleFunc("GET /api/config", s.config)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/queue", s.queue)
@@ -61,7 +62,20 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// health is the Cloud Run startup/liveness endpoint. It reports the process, not
+// the backend: python-backend scales to zero, so a cold backend must not fail this
+// service's own startup probe.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "ok",
+		"service": "go-webui",
+		"grpc":    s.cfg.GRPCTarget,
+		"tls":     !s.cfg.Insecure,
+	})
+}
+
+// ready reports whether the python-backend gRPC channel answers.
+func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
 	if err := s.client.Ping(ctx); err != nil {
@@ -72,11 +86,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok",
-		"grpc":   s.cfg.GRPCTarget,
-		"tls":    !s.cfg.Insecure,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "grpc": s.cfg.GRPCTarget})
 }
 
 func (s *Server) config(w http.ResponseWriter, r *http.Request) {

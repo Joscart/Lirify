@@ -305,18 +305,19 @@ jobs:
           [ -f tfapply.log ] && log=tfapply.log
           [ -z "$log" ] && [ -f tfplan.log ] && log=tfplan.log
           [ -z "$log" ] && { echo "no terraform log captured"; exit 0; }
-          # Keep the first provider error block: that is the actionable one.
-          awk '/[│|] Error:|^Error:/{flag=1} flag{print} /^[│|] *$/{if(flag){exit}}' "$log" \
-            | sed -E 's/^[│|] ?//' | head -40 > terraform-error.txt
-          cat terraform-error.txt
-          if [ -s terraform-error.txt ]; then
-            title="$(head -1 terraform-error.txt | cut -c1-120)"
-            body="$(tail -n +2 terraform-error.txt | tr '\n' ' ' | cut -c1-900)"
-            echo "::error title=$title::$body"
+          # Strip ANSI colours before matching: Terraform prints coloured box glyphs.
+          sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "$log" > tfclean.log
+          if grep -q 'Error:' tfclean.log; then
+            awk 'f{print} /Error:/{f=1}' tfclean.log | head -35 > terraform-error.txt
           else
-            echo "::error::terraform failed; last 20 log lines:"
-            tail -20 "$log" | while IFS= read -r line; do echo "::error::$line"; done
+            tail -30 tfclean.log > terraform-error.txt
           fi
+          echo "----- terraform error -----"
+          cat terraform-error.txt
+          echo "---------------------------"
+          title="$(grep -m1 'Error:' terraform-error.txt | cut -c1-110)"
+          body="$(tr '\n' ' ' < terraform-error.txt | cut -c1-900)"
+          echo "::error title=${title:-terraform apply failed}::${body}"
 
       - name: Publish outputs
         run: |
@@ -353,7 +354,8 @@ jobs:
           api=$(gcloud run services describe "$SERVICE_PYTHON" --region "$REGION" --format='value(status.url)')
           web=$(gcloud run services describe "$SERVICE_WEB" --region "$REGION" --format='value(status.url)')
           index=$(gcloud run services describe "$SERVICE_GO" --region "$REGION" --format='value(status.url)')
-          for pair in "python:$api/health" "web:$web/healthz" "index:$index/healthz"; do
+          # index/readyz proves go-webui -> python-backend gRPC over cloud TLS.
+          for pair in "python:$api/health" "web:$web/healthz" "index:$index/healthz" "index-grpc:$index/readyz"; do
             name="${pair%%:*}"; url="${pair#*:}"
             for attempt in $(seq 1 20); do
               code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 20 "$url" || true)
