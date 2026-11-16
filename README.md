@@ -10,7 +10,7 @@ Cloud:
 | Service | URL | Stack |
 | --- | --- | --- |
 | `astro-webui` | https://lirify.joscart.win | Astro SSR player (gRPC client) |
-| `go-webui` | https://index.liirify.joscart.win | Go indexer dashboard (gRPC client) |
+| `go-webui` | https://index.lirify.joscart.win | Go indexer dashboard (gRPC client) |
 | `python-backend` | Cloud Run, private URL | FastAPI + gRPC (h2c) core engine |
 | AI agents | `POST /api/v1/bot/index-playlist` | bearer-protected ingestion API |
 
@@ -44,22 +44,51 @@ Cloud Run may recycle a container at any time, so nothing is written to disk:
 | Listening/search history, playback session | the browser (`localStorage`) |
 | TF-IDF matrices, inverted index | process memory, rebuilt from Atlas on boot |
 
-The legacy `data/*.json` files are no longer read or written.
+The legacy `data/*.json` files are no longer read or written. To move an existing
+on-disk library into the configured database:
+
+```bash
+docker compose run --rm --no-deps \
+  -v "$PWD/scripts:/scripts:ro" -v "$PWD/data:/legacy:ro" \
+  api python /scripts/migrate_json_to_mongo.py --data-dir /legacy
+docker compose restart api   # rebuilds the index and backfills Qdrant
+```
 
 ## Run
 
 ```bash
+cp .env.example .env      # already present in this checkout
+
+# Cloud databases (Atlas + Qdrant Cloud) — what .env points at today:
 docker compose up -d --build
+
+# or containerised databases, no cloud account:
+docker compose -f docker-compose.yml -f docker-compose.local-db.yml up -d --build
 ```
 
-Brings up `mongo`, `qdrant`, `api` (:8000 → REST + gRPC h2c), `go-ui` (:8080) and
-`web` (:4321). Then:
+MongoDB is configured with **connection strings only**: `MONGODB_URI` is the single
+source of truth (the API connects with it verbatim, and `db-init` parses it to
+create the database and application user). `MONGO_ROOT_URI` exists solely for that
+one-shot init step. Point `MONGODB_URI` at an Atlas string to leave the container
+behind.
+
+The default stack is `api`, `web` and `go-ui` only; the `local-db` overlay adds
+`mongo` (root-authenticated), `db-init` (creates the `lirify` database and its
+application user — idempotent, runs before the API) and `qdrant`, plus `api`
+(:8000 → REST + gRPC h2c, :50051 direct gRPC), `go-ui` (:8080) and `web` (:4321).
+
+Local compose is deliberately unlimited so you can bulk-index while developing:
+`MAX_INDEXED_SONGS=-1`, `PUBLIC_RATE_LIMIT_PER_MINUTE=0`, `BOT_RATE_LIMIT=0`.
+Production flips all three to finite values (see `infra/variables.tf`).
+
+Then:
 
 - Player: http://localhost:4321
 - Indexer: http://localhost:8080
 - API docs: http://localhost:8000/docs
 
-Rebuild after edits:
+Rebuild after edits (images are not bind-mounted, so `up -d` alone keeps the old
+code):
 
 ```bash
 docker compose build api && docker compose up -d api
@@ -117,7 +146,8 @@ curl -X POST localhost:8000/api/v1/bot/index-playlist \
 ```
 
 Commit rules: non-empty lyrics **and** `language in {en, es}`. The index is
-accumulative; duplicates are skipped per track. Failed lookups go to
+accumulative; duplicates are skipped per track. `MAX_INDEXED_SONGS` defaults to
+1000 in production (512 MiB container) and is `-1` (unlimited) in local compose. Failed lookups go to
 `failed_songs` and are retried with bounded backoff. Terminal playlist errors
 (private, deleted, malformed, geo-blocked, YouTube bot check) are not retried.
 

@@ -1,55 +1,33 @@
-# Local development / single-host stack.
+# Lirify — application stack.
 #
-# The services are stateless: MongoDB and Qdrant run as containers here only so
-# `docker compose up` needs no cloud account. In production they are MongoDB Atlas
-# and Qdrant Cloud, injected through Secret Manager (see infra/).
+# The three services are stateless and read their configuration from `.env`,
+# including MONGODB_URI and QDRANT_URL:
+#
+#   * cloud databases (Atlas + Qdrant Cloud) — the default for this checkout:
+#       docker compose up -d --build
+#
+#   * containerised databases (no cloud account needed):
+#       docker compose -f docker-compose.yml -f docker-compose.local-db.yml up -d --build
+#
+# Local tuning in .env: no rate limits, unlimited index capacity.
 services:
-  mongo:
-    image: mongo:7
-    container_name: lirify-mongo
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-
-  qdrant:
-    image: qdrant/qdrant:v1.12.4
-    container_name: lirify-qdrant
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    restart: unless-stopped
-
   api:
     build: ./services/api
     container_name: lirify-api
-    environment:
-      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
-      MONGODB_DB: ${MONGODB_DB:-lirify}
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
-      BOT_INGEST_API_KEY: ${BOT_INGEST_API_KEY:-dev-bot-key}
-      MAX_INDEXED_SONGS: ${MAX_INDEXED_SONGS:-1500}
+    # Single source of truth: MONGODB_URI / QDRANT_URL / limits, all from .env.
+    env_file:
+      - .env
     ports:
-      - "8000:8080"   # REST + gRPC h2c behind the in-container mux
-    depends_on:
-      mongo:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
+      - "8000:8080"    # REST + gRPC h2c behind the in-container mux
+      - "50051:50051"  # direct gRPC, handy for grpcurl
+    # No database dependency: with cloud databases this stack starts standalone.
+    # docker-compose.local-db.yml adds the ordering for containerised databases.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 20s
+      start_period: 30s
     restart: unless-stopped
 
   go-ui:
@@ -60,7 +38,7 @@ services:
       GRPC_TARGET: api:50051
       GRPC_TLS: "false"
       PYTHON_BACKEND_URL: http://api:8080
-      PUBLIC_PLAYER_URL: https://${LIRIFY_DOMAIN:-lirify.joscart.win}
+      PUBLIC_PLAYER_URL: https://${LIRIFY_DOMAIN}
     ports:
       - "8080:8080"
     depends_on:
@@ -98,9 +76,9 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      LIRIFY_DOMAIN: ${LIRIFY_DOMAIN:-lirify.joscart.win}
-      LIRIFY_INDEX_DOMAIN: ${LIRIFY_INDEX_DOMAIN:-index.liirify.joscart.win}
-      LIRIFY_EMAIL: ${LIRIFY_EMAIL:-admin@lirify.joscart.win}
+      LIRIFY_DOMAIN: ${LIRIFY_DOMAIN}
+      LIRIFY_INDEX_DOMAIN: ${LIRIFY_INDEX_DOMAIN}
+      LIRIFY_EMAIL: ${LIRIFY_EMAIL}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -112,7 +90,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  mongo_data:
-  qdrant_data:
   caddy_data:
   caddy_config:

@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import random
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -44,7 +45,14 @@ PLAYLIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,64}$")
 _ERROR_PATTERNS = [
     ("private_playlist", ("private video", "this playlist is private", "playlist is private")),
     ("not_found", ("does not exist", "http error 404", "playlist not found", "removed by the uploader")),
-    ("unavailable", ("video unavailable", "this video is unavailable", "no video ids found")),
+    ("unavailable", (
+        "video unavailable",
+        "this video is unavailable",
+        "no video ids found",
+        # YouTube mix/radio playlists (list=RD...) cannot be enumerated by yt-dlp.
+        "playlist type is unviewable",
+        "unviewable",
+    )),
     ("restricted", ("sign in to confirm your age", "age-restricted", "members-only", "requires payment")),
     ("rate_limited", ("http error 429", "too many requests", "rate limit")),
     ("geo_blocked", ("not available in your country", "geo restricted")),
@@ -55,7 +63,8 @@ _ERROR_PATTERNS = [
     ("network_error", ("unable to download", "timed out", "connection refused", "temporary failure")),
 ]
 
-# Failures that will never succeed on retry; refusing them saves free-tier quota.
+# Failures that will never succeed on an automatic *server* retry. The server
+# stops there and hands the decision to the agent, which owns backoff timing.
 TERMINAL_ERRORS = {
     "private_playlist",
     "not_found",
@@ -66,18 +75,55 @@ TERMINAL_ERRORS = {
     "bot_check",
 }
 
+# Failures an agent may retry itself by resubmitting through the API after a
+# randomised delay. `bot_check` is here on purpose: YouTube's anti-bot challenge
+# is time- and egress-dependent, so a jittered agent retry is the only sane
+# strategy, and the server never burns quota retrying it in the background.
+AGENT_RETRYABLE = {
+    "rate_limited",
+    "network_error",
+    "index_failed",
+    "bot_check",
+}
+
+BOT_CHECK_RETRY_MIN = int(os.environ.get("BOT_CHECK_RETRY_MIN_SECONDS", "900"))
+BOT_CHECK_RETRY_MAX = int(os.environ.get("BOT_CHECK_RETRY_MAX_SECONDS", "7200"))
+
 
 def classify_playlist_error(message: str) -> Dict[str, Any]:
     """Map a raw yt-dlp error to a stable code plus a bot-friendly retry hint."""
     text = (message or "").lower()
     for code, needles in _ERROR_PATTERNS:
         if any(needle in text for needle in needles):
-            return {
-                "code": code,
-                "retryable": code not in TERMINAL_ERRORS,
-                "hint": _HINTS[code],
-            }
-    return {"code": "index_failed", "retryable": True, "hint": _HINTS["index_failed"]}
+            return _failure(code)
+    return _failure("index_failed")
+
+
+def _failure(code: str) -> Dict[str, Any]:
+    """Describe a failure in terms an autonomous agent can act on.
+
+    The server never schedules a retry for these codes; `retry_mode` tells the
+    agent whether *it* should resubmit and how to spread out the timing.
+    """
+    payload: Dict[str, Any] = {
+        "code": code,
+        "retryable": code in AGENT_RETRYABLE,
+        "retry_mode": "agent-jitter" if code in AGENT_RETRYABLE else "never",
+        "hint": _HINTS[code],
+    }
+    if code == "bot_check":
+        low, high = sorted((BOT_CHECK_RETRY_MIN, BOT_CHECK_RETRY_MAX))
+        payload["retry_window_seconds"] = [max(60, low), max(120, high)]
+        payload["recommended_retry_after_seconds"] = random.randint(
+            max(60, low), max(120, high)
+        )
+        payload["advice"] = (
+            "Prefer one large playlist over many small submissions: each yt-dlp "
+            "extraction is a separate request pattern YouTube can challenge."
+        )
+    elif code == "rate_limited":
+        payload["recommended_retry_after_seconds"] = random.randint(60, 300)
+    return payload
 
 
 _HINTS = {
@@ -180,6 +226,13 @@ def build_bot_router(
         return expected
 
     def enforce_rate_limit(key: str) -> Dict[str, str]:
+        # Local compose runs unlimited: no quota accounting on the dev stack.
+        if rate_limit <= 0:
+            return {
+                "X-RateLimit-Limit": "unlimited",
+                "X-RateLimit-Remaining": "unlimited",
+                "X-RateLimit-Reset": "0",
+            }
         allowed, count, reset_in = store.rate_limit_hit(key, rate_limit, rate_window)
         if not allowed:
             raise HTTPException(
@@ -259,7 +312,16 @@ def build_bot_router(
             )
         body: Dict[str, Any] = {"job": job}
         if job.get("error"):
-            body["failure"] = classify_playlist_error(str(job["error"]))
+            failure = classify_playlist_error(str(job["error"]))
+            body["failure"] = failure
+            body["next_action"] = {
+                "action": "resubmit" if failure.get("retryable") else "give_up",
+                "mode": failure.get("retry_mode"),
+                "playlist_url": job.get("url") or "",
+                "recommended_retry_after_seconds": failure.get(
+                    "recommended_retry_after_seconds"
+                ),
+            }
         return body
 
     @router.get("/playlists/validate")

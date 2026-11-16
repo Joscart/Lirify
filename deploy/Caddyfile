@@ -7,7 +7,7 @@
 #   https://lirify.joscart.win        -> astro-webui (SSR player, proxies /api/player)
 #   https://lirify.joscart.win/api/v1/bot/*  -> python-backend REST (bot ingestion)
 #   https://lirify.joscart.win/api/*         -> python-backend core API (prefix stripped)
-#   https://index.liirify.joscart.win        -> go-webui (playlist indexer dashboard)
+#   https://index.lirify.joscart.win        -> go-webui (playlist indexer dashboard)
 #
 # HTTPS certificates are issued automatically once DNS points here and ports
 # 80/443 are reachable.
@@ -49,7 +49,7 @@
 	}
 }
 
-{$LIRIFY_INDEX_DOMAIN:index.liirify.joscart.win} {
+{$LIRIFY_INDEX_DOMAIN:index.lirify.joscart.win} {
 	encode zstd gzip
 	reverse_proxy go-ui:8080
 }

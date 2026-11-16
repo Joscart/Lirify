@@ -185,6 +185,18 @@ resource "google_cloud_run_v2_service" "python" {
         name  = "BOT_RATE_WINDOW_SECONDS"
         value = tostring(var.bot_rate_window_seconds)
       }
+      env {
+        name  = "BOT_CHECK_RETRY_MIN_SECONDS"
+        value = tostring(var.bot_check_retry_min_seconds)
+      }
+      env {
+        name  = "BOT_CHECK_RETRY_MAX_SECONDS"
+        value = tostring(var.bot_check_retry_max_seconds)
+      }
+      env {
+        name  = "PUBLIC_RATE_LIMIT_PER_MINUTE"
+        value = tostring(var.public_rate_limit_per_minute)
+      }
 
       env {
         name = "MONGODB_URI"

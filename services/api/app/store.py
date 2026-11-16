@@ -108,6 +108,18 @@ def _now() -> float:
     return time.time()
 
 
+def redact_uri(uri: str) -> str:
+    """Connection string safe for logs: host, database and user, never the password."""
+    match = re.match(
+        r"^(mongodb(?:\+srv)?)://(?:([^:@/]+)(?::[^@/]*)?@)?([^/?]+)(?:/([^?]*))?",
+        (uri or "").strip(),
+    )
+    if not match:
+        return "<invalid uri>"
+    scheme, user, host, database = match.groups()
+    return f"{scheme}://{user + '@' if user else ''}{host}/{database or ''}"
+
+
 def _iso(value: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(value))
 
@@ -216,6 +228,15 @@ class MongoStore(Store):
     def __init__(self, uri: str, db_name: str = "lirify") -> None:
         from pymongo import ASCENDING, DESCENDING, MongoClient
         from pymongo.errors import CollectionInvalid
+
+        if not re.match(r"^mongodb(\+srv)?://", uri.strip()):
+            raise ValueError(
+                "MONGODB_URI must start with mongodb:// or mongodb+srv:// "
+                f"(got {redact_uri(uri)!r})"
+            )
+        print(
+            f"[lirify] mongo target {redact_uri(uri)} db={db_name}", flush=True
+        )
 
         self._asc = ASCENDING
         self._desc = DESCENDING
@@ -769,7 +790,9 @@ def get_store() -> Store:
     global _STORE
     if _STORE is not None:
         return _STORE
-    uri = (os.environ.get("MONGODB_URI") or "").strip()
+    # One connection string. `MONGO_URI` is accepted as an alias for tools that
+    # use that name, but MONGODB_URI always wins.
+    uri = (os.environ.get("MONGODB_URI") or os.environ.get("MONGO_URI") or "").strip()
     if not uri:
         print(
             "[lirify] MONGODB_URI is not set; using the in-process MemoryStore. "
@@ -778,7 +801,12 @@ def get_store() -> Store:
         )
         _STORE = MemoryStore()
         return _STORE
-    _STORE = MongoStore(uri, os.environ.get("MONGODB_DB", "lirify"))
+    db_name = (os.environ.get("MONGODB_DB") or "").strip()
+    if not db_name:
+        # Derive the database from the URI path, exactly like a Mongoose client.
+        path = re.sub(r"^mongodb(?:\+srv)?://[^/]+/?", "", uri).split("?")[0]
+        db_name = path or "lirify"
+    _STORE = MongoStore(uri, db_name)
     return _STORE
 
 

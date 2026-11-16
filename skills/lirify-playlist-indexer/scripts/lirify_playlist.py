@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -276,6 +277,7 @@ def job_status(job_id: str) -> Dict[str, Any]:
     _, data = _request("GET", f"/api/v1/bot/jobs/{urllib.parse.quote(job_id)}")
     job = data.get("job") or {}
     failure = data.get("failure") or {}
+    next_action = data.get("next_action") or {}
     return {
         "ok": True,
         "job_id": job.get("job_id", job_id),
@@ -283,10 +285,18 @@ def job_status(job_id: str) -> Dict[str, Any]:
         "stage": job.get("stage"),
         "added": job.get("added", 0),
         "attempts": job.get("attempts", 0),
+        "url": job.get("url") or "",
         "error": job.get("error") or "",
         "error_code": job.get("error_code") or failure.get("code") or "",
         "retryable": failure.get("retryable"),
+        "retry_mode": failure.get("retry_mode", next_action.get("mode", "")),
+        "retry_window_seconds": failure.get("retry_window_seconds"),
+        "recommended_retry_after_seconds": failure.get(
+            "recommended_retry_after_seconds",
+            next_action.get("recommended_retry_after_seconds"),
+        ),
         "hint": failure.get("hint", ""),
+        "advice": failure.get("advice", ""),
         "done": job.get("status") in TERMINAL_STATUSES,
     }
 
@@ -315,6 +325,18 @@ def wait_for_job(
     return seen
 
 
+def _retry_delay(status: Dict[str, Any], low: float, high: float) -> float:
+    """Pick a randomised delay, respecting the window the server suggests."""
+    window = status.get("retry_window_seconds") or [low, high]
+    try:
+        window_low, window_high = float(window[0]), float(window[1])
+    except (TypeError, ValueError, IndexError):
+        window_low, window_high = low, high
+    low = max(5.0, min(low, window_low))
+    high = max(low, min(high, window_high))
+    return random.uniform(low, high)
+
+
 def index_playlist(
     playlist_url: str,
     source_bot: str = "ai-agent",
@@ -322,13 +344,53 @@ def index_playlist(
     wait: bool = True,
     timeout: Optional[float] = None,
     idempotency_key: str = "",
+    max_retries: int = 0,
+    jitter_min: Optional[float] = None,
+    jitter_max: Optional[float] = None,
+    quiet: bool = True,
 ) -> Dict[str, Any]:
-    """One-call helper used by the MCP server and the LangChain tool."""
-    submitted = submit(playlist_url, source_bot=source_bot, limit=limit, idempotency_key=idempotency_key)
-    if not wait or not submitted.get("job_id"):
-        return submitted
-    final = wait_for_job(submitted["job_id"], timeout=timeout)
-    return {**submitted, "final": final, "ok": bool(final.get("status") == "committed")}
+    """One-call helper used by the CLI, the MCP server and the LangChain tool.
+
+    The server never retries terminal playlist failures. When ``max_retries`` is
+    greater than zero this client may resubmit *through the API* after a random
+    delay, which is the supported strategy for YouTube's anti-bot challenge: the
+    caller (an agent such as Hermes) owns the timing, and one large playlist costs
+    far fewer scrape requests than many small ones.
+    """
+    low = float(jitter_min if jitter_min is not None else os.environ.get("LIRIFY_RETRY_JITTER_MIN", "900"))
+    high = float(jitter_max if jitter_max is not None else os.environ.get("LIRIFY_RETRY_JITTER_MAX", "7200"))
+    attempts = 0
+    result: Dict[str, Any] = {}
+
+    while True:
+        submitted = submit(
+            playlist_url, source_bot=source_bot, limit=limit, idempotency_key=idempotency_key
+        )
+        if not wait or not submitted.get("job_id"):
+            return submitted
+        final = wait_for_job(submitted["job_id"], timeout=timeout, quiet=quiet)
+        result = {**submitted, "final": final, "retries_used": attempts}
+        if final.get("status") == "committed":
+            result["ok"] = True
+            return result
+        if final.get("timed_out"):
+            result["ok"] = False
+            return result
+        if not final.get("retryable") or attempts >= max_retries:
+            result["ok"] = False
+            return result
+        delay = _retry_delay(final, low, high)
+        attempts += 1
+        if not quiet:
+            print(
+                f"retryable failure ({final.get('error_code')}); resubmitting in {delay:.0f}s "
+                f"(attempt {attempts}/{max_retries})",
+                file=sys.stderr,
+            )
+        time.sleep(delay)
+        # A fresh idempotency key: the previous job is terminal, a resubmission is
+        # a new job by design.
+        idempotency_key = ""
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +442,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--no-wait", action="store_true", help="Return as soon as the job is accepted")
     parser.add_argument("--timeout", type=float, default=None, help="Seconds to wait for completion")
     parser.add_argument("--idempotency-key", default="")
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=int(os.environ.get("LIRIFY_MAX_RETRIES", "0")),
+        help="Agent-side resubmissions after a retryable failure (bot check, rate limit). Default 0.",
+    )
+    parser.add_argument(
+        "--jitter-min",
+        type=float,
+        default=None,
+        help="Lower bound of the randomised retry delay (default 900s).",
+    )
+    parser.add_argument(
+        "--jitter-max",
+        type=float,
+        default=None,
+        help="Upper bound of the randomised retry delay (default 7200s).",
+    )
     parser.add_argument("--json", action="store_true", help="Machine-readable output")
     args = parser.parse_args(argv)
 
@@ -396,6 +476,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 wait=not args.no_wait,
                 timeout=args.timeout,
                 idempotency_key=args.idempotency_key,
+                max_retries=max(0, args.max_retries),
+                jitter_min=args.jitter_min,
+                jitter_max=args.jitter_max,
+                quiet=False,
             )
             _print(result, args.json)
             if result.get("timed_out"):

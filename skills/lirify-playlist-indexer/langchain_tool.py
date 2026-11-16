@@ -32,15 +32,33 @@ class IndexPlaylistArgs(BaseModel):
     source_bot: str = Field("ai-agent", description="Agent name recorded on the job.")
     limit: Optional[int] = Field(None, ge=1, le=500, description="Index at most N videos.")
     wait: bool = Field(True, description="Poll until the job commits or fails.")
+    max_retries: int = Field(
+        0,
+        ge=0,
+        le=5,
+        description="Agent-side resubmissions after a retryable failure, with randomised delay.",
+    )
 
 
 class JobStatusArgs(BaseModel):
     job_id: str = Field(..., description="Job id returned by index_youtube_playlist.")
 
 
-def _index(playlist_url: str, source_bot: str = "ai-agent", limit: Optional[int] = None, wait: bool = True) -> Dict[str, Any]:
+def _index(
+    playlist_url: str,
+    source_bot: str = "ai-agent",
+    limit: Optional[int] = None,
+    wait: bool = True,
+    max_retries: int = 0,
+) -> Dict[str, Any]:
     try:
-        return index_playlist(playlist_url, source_bot=source_bot, limit=limit, wait=wait)
+        return index_playlist(
+            playlist_url,
+            source_bot=source_bot,
+            limit=limit,
+            wait=wait,
+            max_retries=max_retries,
+        )
     except LirifyError as error:
         return error.as_dict()
 

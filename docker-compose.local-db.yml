@@ -1,0 +1,72 @@
+# Local database overlay: MongoDB + Qdrant as containers, plus the API's ordering.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local-db.yml up -d --build
+#
+# Use it only when `.env` points at the containers:
+#   MONGODB_URI=mongodb://lirify:<pass>@mongo:27017/lirify?authSource=lirify
+#   QDRANT_URL=http://qdrant:6333
+#
+# With Atlas + Qdrant Cloud in `.env`, just run `docker compose up -d --build`.
+services:
+  mongo:
+    image: mongo:7
+    container_name: lirify-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'mongosh --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand({ping:1}).ok" | grep -q 1',
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # Creates the database + application user, then exits. On Atlas the user is
+  # console-managed, so there this step only writes a schema marker.
+  db-init:
+    image: mongo:7
+    container_name: lirify-db-init
+    depends_on:
+      mongo:
+        condition: service_healthy
+    # The same MONGODB_URI the API uses; the script parses it for db/user/password.
+    env_file:
+      - .env
+    volumes:
+      - ./infra/mongo/init.js:/scripts/init.js:ro
+    # A single connection string, only for this one-shot step.
+    entrypoint:
+      - mongosh
+      - ${MONGO_ROOT_URI}
+      - --file
+      - /scripts/init.js
+    restart: "no"
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: lirify-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  api:
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_started
+
+volumes:
+  mongo_data:
+  qdrant_data:

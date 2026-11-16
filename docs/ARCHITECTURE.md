@@ -135,9 +135,19 @@ pins `min_instances = 0`, `max_instances = 1`, `cpu = 1`, `cpu_idle = true`.
 
 The binding constraint is memory: 512 MiB must hold the TF-IDF matrix
 (`vocabulary × songs` float32) and up to five `songs²` float32 matrices. At
-N = 1500 that is roughly 45 MB of matrices plus the vocabulary; `MAX_INDEXED_SONGS`
-defaults to 1500 and the matrix worker refuses to commit beyond it with a clear
-error instead of being OOM-killed mid-batch.
+N = 1000 that is roughly 20 MB of matrices plus the vocabulary, which leaves room
+for the lyric cache and provider responses. `MAX_INDEXED_SONGS` defaults to 1000
+and the matrix worker refuses to commit beyond it with a clear error instead of
+being OOM-killed mid-batch. Local compose sets `-1` (unlimited) because the host
+has memory to spare.
+
+Two independent quotas protect the public surface:
+
+* reads — in-process per-IP token window (`PUBLIC_RATE_LIMIT_PER_MINUTE`, 120/min
+  in production, `0` = off locally), no database round-trip on the hot path;
+* writes — bearer-protected bot API limited per API key in MongoDB
+  (`BOT_RATE_LIMIT`/`BOT_RATE_WINDOW_SECONDS`), so the quota is shared across
+  cold starts and instances.
 
 ## Known trade-offs
 

@@ -116,7 +116,7 @@ const BotIdempotency = mongoose.model("BotIdempotency", new mongoose.Schema({
 
 ## Size planning (M0 = 512 MB)
 
-A track with a 4 KB lyric blob is ≈ 5 KB in BSON; 1500 tracks ≈ 7.5 MB. The
+A track with a 4 KB lyric blob is ≈ 5 KB in BSON; 1000 tracks ≈ 5 MB. The
 `lyrics_cache` mirrors successful lookups (another ≈ 7.5 MB) and `stashes` are
 transient. An M0 cluster is comfortably large for several thousand tracks.
 

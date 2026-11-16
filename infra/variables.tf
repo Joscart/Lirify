@@ -54,10 +54,7 @@ variable "web_domain" {
 variable "index_domain" {
   description = "Public host for the Go playlist indexer dashboard."
   type        = string
-  # NOTE: this literal host contains a double "i" (liirify). It is what the
-  # deployment brief specifies; change it here if the intended host is
-  # index.lirify.joscart.win.
-  default = "index.liirify.joscart.win"
+  default     = "index.lirify.joscart.win"
 }
 
 variable "enable_domain_mappings" {
@@ -151,9 +148,15 @@ variable "bot_ingest_api_key" {
 }
 
 variable "bot_rate_limit" {
-  description = "Bot submissions allowed per window, per API key."
+  description = "Bot submissions allowed per window, per API key. 0 or -1 disables the limit (local compose)."
   type        = number
   default     = 30
+}
+
+variable "public_rate_limit_per_minute" {
+  description = "Requests per minute per client IP across the public REST surface. 0 or -1 disables it (local compose)."
+  type        = number
+  default     = 120
 }
 
 variable "bot_rate_window_seconds" {
@@ -161,10 +164,25 @@ variable "bot_rate_window_seconds" {
   default = 3600
 }
 
-variable "max_indexed_songs" {
-  description = "Capacity guard for the in-process TF-IDF index (512Mi container)."
+variable "bot_check_retry_min_seconds" {
+  description = "Lower bound of the randomised retry window suggested to agents after a YouTube bot check."
   type        = number
-  default     = 1500
+  default     = 900
+}
+
+variable "bot_check_retry_max_seconds" {
+  description = "Upper bound of the randomised retry window suggested to agents after a YouTube bot check."
+  type        = number
+  default     = 7200
+}
+
+variable "max_indexed_songs" {
+  description = <<-EOT
+    Capacity guard for the in-process TF-IDF index (512Mi container).
+    Default 1000. Set -1 for unlimited — only on a memory-rich local stack.
+  EOT
+  type        = number
+  default     = 1000
 }
 
 variable "max_job_attempts" {

@@ -11,8 +11,17 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 
 ## Run and verify
 
-- `docker compose up -d --build` starts `mongo`, `qdrant`, `api` (8000 → REST +
-  gRPC h2c behind the in-container mux), `go-ui` (8080), `web` (4321).
+- `docker compose up -d --build` starts `api`, `web` and `go-ui` against whatever
+  `MONGODB_URI`/`QDRANT_URL` point at (Atlas + Qdrant Cloud in this checkout).
+  For containerised databases add the overlay:
+  `docker compose -f docker-compose.yml -f docker-compose.local-db.yml up -d --build`
+  which also starts `mongo`, `db-init`, `qdrant` and `api`
+  (8000 → REST + gRPC h2c behind the in-container mux, 50051 direct gRPC),
+  `go-ui` (8080), `web` (4321). Configuration comes from `.env` (copy
+  `.env.example`); `db-init` creates the database + app user before the API boots.
+- Local compose runs unlimited on purpose: `MAX_INDEXED_SONGS=-1`,
+  `PUBLIC_RATE_LIMIT_PER_MINUTE=0`, `BOT_RATE_LIMIT=0`. Production uses 1000 /
+  120/min / 30 per hour.
 - Rebuild after edits: `docker compose build <service> && docker compose up -d <service>`.
   Go UI templates are embedded with `go:embed`, so template edits need a `go-ui` rebuild.
 - Logs: `docker compose logs -f api`.
@@ -83,12 +92,18 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   zero new unique, eligible songs; partial duplicate batches still commit the new ones.
 - Successful lyric lookups are cached in `lyrics_cache`; negative results are not
   cached, they go to `failed_songs` and are retried by the background worker.
-- Pending jobs persist in `jobs`; failed jobs retry with backoff, except terminal
-  playlist errors (`private_playlist`, `not_found`, `invalid_playlist`,
-  `unavailable`, `restricted`, `geo_blocked`, `bot_check`). Tune with
-  `MAX_JOB_ATTEMPTS` (default 8) and `RETRY_INTERVAL_SECONDS` (default 300).
-- `MAX_INDEXED_SONGS` (default 1500) is a hard capacity guard for the 512 MiB
+- Pending jobs persist in `jobs`. **Playlist scrape failures never retry on the
+  server**: the job ends in `error`/`gave_up` with a classified `error_code` and a
+  `retry_mode` (`agent-jitter` or `never`). Agents resubmit through the bot API
+  after a randomised delay. `MAX_JOB_ATTEMPTS` (default 8) and
+  `RETRY_INTERVAL_SECONDS` (default 300) now bound matrix-commit retries and
+  failed-song lyric retries only.
+- `MAX_INDEXED_SONGS` (default 1000) is a hard capacity guard for the 512 MiB
   container; exceeding it fails the batch instead of OOM-killing the revision.
+  `-1` disables it (local compose only).
+- The public REST surface is rate limited per IP (`PUBLIC_RATE_LIMIT_PER_MINUTE`,
+  in-process limiter in `main.py`); the bot write path is limited per API key via
+  MongoDB so the quota survives cold starts. Both accept `0` = unlimited.
 - Similarity weights live only in `WEIGHTS` in `main.py`: name `.10`, artist
   `.05`, language `.05`, lyrics `.8`.
 
@@ -96,6 +111,19 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 
 - `data/` is legacy: the refactor removed every local JSON read/write. It is no
   longer mounted by `docker compose`. Do not reintroduce file I/O in the API.
+- MongoDB is configured by a **connection string only**: `MONGODB_URI` (alias
+  `MONGO_URI`) for the API, `MONGO_ROOT_URI` for the one-shot `db-init`. The
+  database name is derived from the URI path when `MONGODB_DB` is unset.
+  `infra/mongo/init.js` parses `MONGODB_URI` to create the app user, so there are
+  no duplicated credential variables.
+- Atlas database users live in the `admin` auth database: `MONGODB_URI` must carry
+  `authSource=admin`, otherwise the driver fails with `bad auth : Authentication
+  failed`. `infra/mongo/init.js` cannot create users there (Atlas-managed) and is
+  expected to continue with a warning.
+- Legacy JSON can be loaded into the configured database with
+  `scripts/migrate_json_to_mongo.py` (idempotent upserts, matrices excluded).
+- After editing Python code, `docker compose up -d api` is not enough: run
+  `docker compose build api && docker compose up -d api` (images are not mounted).
 - README and this file must stay in sync with `main.py`, `store.py` and the proto.
 - `GET /song/{id}` and `/songs` expose only committed songs; filtered or
   not-yet-committed tracks return 404.
@@ -111,3 +139,6 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   (`npm run preview`) no longer apply; use `npm run build && npm start`.
 - Free-tier deployment targets `us-central1`/`us-east1`, `min=0`, `max=1`.
   Raising `max_instances` or memory breaks the always-free assumption.
+- YouTube anti-bot challenges are terminal for the server by design; retries are
+  agent-driven (`skills/lirify-playlist-indexer`), jittered, and should submit one
+  large playlist rather than many small ones.

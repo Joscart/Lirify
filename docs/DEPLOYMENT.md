@@ -6,12 +6,11 @@ CI cannot create for itself.
 
 Work top to bottom. Steps 1–6 are one-time. Steps 7–10 are the first deploy.
 
-> **Domain note.** The brief specifies `lirify.joscart.win` for the player and
-> `index.liirify.joscart.win` (two i's) for the indexer. The Terraform variable
-> `index_domain` defaults to that literal value. If the intended host is
-> `index.lirify.joscart.win`, set `INDEX_DOMAIN` (GitHub variable) and
-> `TF_VAR_index_domain` accordingly before step 9 — a hostname you cannot verify
-> will block certificate issuance.
+> **Domains.** `lirify.joscart.win` (player) and `index.lirify.joscart.win`
+> (indexer) are the defaults in `infra/variables.tf`, `docker-compose.yml` and
+> `.env.example`. If you deploy to different hosts, change the GitHub variables
+> (`WEB_DOMAIN`, `INDEX_DOMAIN`) and the matching `TF_VAR_*` values together — a
+> hostname you cannot verify will block certificate issuance.
 
 ---
 
@@ -32,9 +31,11 @@ Work top to bottom. Steps 1–6 are one-time. Steps 7–10 are the first deploy.
 1. Create the project and select it:
 
    ```bash
-   gcloud projects create lirify-prod --name="Lirify"
-   gcloud config set project lirify-prod
+   gcloud config set project lirify-514907
    ```
+
+   (Project `lirify-514907` already exists in this deployment; the bootstrap
+   outputs are recorded in `infra/BOOTSTRAP.md`.)
 
 2. Link billing (required for Cloud Run and Artifact Registry):
 
@@ -54,7 +55,7 @@ Work top to bottom. Steps 1–6 are one-time. Steps 7–10 are the first deploy.
 > `min_instances = 0`, `max_instances = 1` per service, `cpu = 1`,
 > `memory = 512Mi` (python/web) / `256Mi` (go), request-based billing
 > (`cpu_idle = true`), Artifact Registry pruning to two versions per image, and a
-> `MAX_INDEXED_SONGS` capacity guard so a 512 MiB container is never OOM-killed.
+> `MAX_INDEXED_SONGS` capacity guard (default 1000) so a 512 MiB container is never OOM-killed.
 
 ---
 
@@ -149,8 +150,9 @@ This value is the bearer token AI agents use. It is stored in Secret Manager as
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | output from step 2 |
 | `TF_STATE_BUCKET` | output from step 2 |
 | `WEB_DOMAIN` | `lirify.joscart.win` |
-| `INDEX_DOMAIN` | `index.liirify.joscart.win` (see the domain note) |
+| `INDEX_DOMAIN` | `index.lirify.joscart.win` |
 | `ENABLE_DOMAIN_MAPPINGS` | `false` until step 9 is done, then `true` |
+| `GCP_PROJECT_ID` | `lirify-514907` |
 
 ### Repository secrets
 
@@ -247,7 +249,7 @@ Console** by an owner of the GCP project.
    | Host | Type | Name | Value |
    | --- | --- | --- | --- |
    | `lirify.joscart.win` | `CNAME` | `lirify` | `ghs.googlehosted.com.` |
-   | `index.liirify.joscart.win` | `CNAME` | `index.liirify` | `ghs.googlehosted.com.` |
+   | `index.lirify.joscart.win` | `CNAME` | `index` | `ghs.googlehosted.com.` |
    | apex (`joscart.win`) | `A` / `AAAA` | `@` | `216.239.32.21` … |
 
    Add them at your DNS provider exactly as printed. CNAMEs must not be
@@ -264,7 +266,7 @@ Console** by an owner of the GCP project.
 
    ```bash
    curl -sI https://lirify.joscart.win | head -3
-   curl -sI https://index.liirify.joscart.win | head -3
+   curl -sI https://index.lirify.joscart.win | head -3
    ```
 
 > Production alternative: Google recommends an external Application Load Balancer
@@ -282,10 +284,10 @@ Console** by an owner of the GCP project.
 | Re-deploy the same commit | Actions → Deploy → Run workflow. |
 | Rotate the bot key | Update the `BOT_INGEST_API_KEY` secret, re-run the workflow (Terraform writes a new secret version and rolls the revision). |
 | Rotate the Atlas password | Update `MONGODB_URI`, re-run. |
-| Index a playlist as an operator | `https://index.liirify.joscart.win` → **Index now**. |
+| Index a playlist as an operator | `https://index.lirify.joscart.win` → **Index now**. |
 | Index a playlist as an agent | `skills/lirify-playlist-indexer` (see `SKILL.md`). |
 | Inspect job history | Go dashboard → Queue, or `curl $API/queue`. |
-| Change capacity | Raise `MAX_INDEXED_SONGS` (default 1500) and python memory together (512Mi → 1Gi leaves the free tier). |
+| Change capacity | Raise `MAX_INDEXED_SONGS` (default 1000) and python memory together (512Mi → 1Gi leaves the free tier). `-1` = unlimited, intended for the local compose stack. |
 | Roll back | Re-run the workflow for the previous commit, or `gcloud run services update-traffic lirify-api --to-revisions=<rev>=100`. |
 
 ### Cost safety
@@ -313,6 +315,8 @@ versions. Cloud Run `max_instances = 1` prevents runaway scaling.
 | `stats` shows `storage.tracks = memory` | `MONGODB_URI` not injected | Check the Secret Manager version exists and the revision has the env var. |
 | Recommendations always empty | Qdrant unreachable or empty | `storage.vectors` must be `qdrant`; the service backfills vectors on boot. |
 | Index job fails with `bot_check` | YouTube anti-bot challenge on the Cloud Run egress | Retry later, or pass cookies to yt-dlp via a custom image. |
-| Index job fails: `Index capacity guard` | `MAX_INDEXED_SONGS` reached | Raise the limit **and** memory, or prune the library. |
+| Index job fails: `Index capacity guard` | `MAX_INDEXED_SONGS` (default 1000) reached | Raise the limit **and** memory, or prune the library. `-1` disables the guard (local only). |
 | Certificate stays `Provisioning` | DNS missing/typo'd (check the double-i host) | Fix DNS; re-check `gcloud run domain-mappings describe`. |
+| Atlas `bad auth : Authentication failed` | `authSource` points at the app database, but Atlas users live in `admin` | Append `?authSource=admin` to `MONGODB_URI` (and `MONGO_ROOT_URI`). |
 | Atlas connection timeouts | Network Access missing `0.0.0.0/0` | Add it in Atlas → Network Access. |
+| `db-init` logs `cannot create user ... continuing` | Atlas manages users in its console | Expected; create/rotate the DB user in Atlas, keep `MONGODB_URI` in sync. |

@@ -87,6 +87,10 @@ python3 scripts/lirify_playlist.py submit "https://www.youtube.com/playlist?list
 # fire-and-forget, then poll later
 python3 scripts/lirify_playlist.py submit "PLxxxxxxxxxxxx" --no-wait
 python3 scripts/lirify_playlist.py wait job-1234567890-abcdef
+
+# agent-owned retry after a YouTube bot check (randomised 15–120 min delay)
+python3 scripts/lirify_playlist.py submit "https://www.youtube.com/playlist?list=PLxxxx" \
+  --max-retries 2 --jitter-min 900 --jitter-max 7200
 ```
 
 Exit codes: `0` committed · `2` invalid URL · `3` auth · `4` rate limited ·
@@ -141,6 +145,30 @@ Content-Type: application/json
 Job `status` values: `queued` → `indexing` → `matrix_pending` → `committed`
 (or `skipped`, `error`). `retry_wait` means a transient failure is backing off.
 
+## Anti-bot strategy: large playlists, agent-owned jitter
+
+YouTube challenges datacenter IPs with a "confirm you're not a bot" page. The
+server treats that as **terminal for itself** — it will not silently retry in the
+background and burn quota. Recovery is an agent responsibility:
+
+1. **Prefer one large playlist.** A single `yt-dlp --flat-playlist` extraction of a
+   25–500 track playlist is one request pattern; ten 5-track submissions are ten
+   chances to be challenged. Do not split a large playlist into small jobs.
+2. **Do not pass `limit` for large submissions.** `limit` still extracts the whole
+   playlist first and then truncates the indexing work, so it saves nothing on the
+   scraping side.
+3. **Retry only through the API, with random timing.** Poll the job; when the
+   failure is `bot_check`, wait a random 15–120 minutes (`--max-retries` /
+   `--jitter-min` / `--jitter-max`) and resubmit. A resubmission is a new job with a
+   new idempotency key — that is intentional.
+4. **Spread retries across playlists.** If several playlists failed, jitter each one
+   independently instead of retrying them in a burst.
+
+The server exposes the policy so an agent can schedule it: `failure.retry_mode` is
+`agent-jitter`, `failure.retry_window_seconds` is the allowed window, and
+`failure.recommended_retry_after_seconds` is a sampled delay.
+`next_action.action` is `resubmit` (retryable) or `give_up` (deterministic).
+
 ## Failure handling
 
 `GET /api/v1/bot/jobs/{id}` adds a `failure` object with `code`, `retryable`
@@ -163,6 +191,7 @@ Other rules:
 - **401/403** → wrong or missing `LIRIFY_BOT_API_KEY`. Stop; do not retry.
 - **429** → server-side quota is `BOT_RATE_LIMIT` submissions per
   `BOT_RATE_WINDOW_SECONDS` (default 30/hour) per key. Back off, then retry.
+  The limit is disabled when `BOT_RATE_LIMIT=0` (local compose).
 - **503 `bot_api_disabled`** → the deployment has no `BOT_INGEST_API_KEY`; the
   operator must set it. Stop.
 - **Timed out waiting** → the job is very likely still running (long playlists).
@@ -174,9 +203,12 @@ Other rules:
   library. Duplicate tracks are skipped and reported as `skipped`.
 - Only tracks with non-empty lyrics and `language in {en, es}` are committed.
   Others are counted in the job's skip statistics, not treated as errors.
-- `MAX_INDEXED_SONGS` (default 1500) is a capacity guard for the 512 MiB Cloud
-  Run container. A batch that would exceed it fails with
-  `Index capacity guard` and commits nothing.
+- `MAX_INDEXED_SONGS` (default 1000) is a capacity guard for the 512 MiB Cloud Run
+  container. A batch that would exceed it fails with `Index capacity guard` and
+  commits nothing. `-1` disables the guard (local compose with enough RAM).
+- Reads are public but rate limited per IP (`PUBLIC_RATE_LIMIT_PER_MINUTE`,
+  default 120/min in production, unlimited when `0`). Writes always need the
+  bearer token.
 - Cloud Run scales to zero: the first request after idle may take a few seconds
   and the client should allow a generous connect timeout.
 - Playlists are scraped with `yt-dlp`; very large playlists take minutes. Use

@@ -85,6 +85,16 @@ TOOLS = [
                     "description": "Poll until the job finishes (default) or return immediately.",
                 },
                 "timeout_seconds": {"type": "number", "default": 900},
+                "max_retries": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5,
+                    "default": 0,
+                    "description": (
+                        "Agent-side resubmissions after a retryable failure "
+                        "(bot_check / rate limit), using a randomised delay."
+                    ),
+                },
             },
             "required": ["playlist_url"],
         },
@@ -120,6 +130,8 @@ def call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 limit=arguments.get("limit"),
                 wait=bool(arguments.get("wait", True)),
                 timeout=arguments.get("timeout_seconds"),
+                max_retries=int(arguments.get("max_retries") or 0),
+                quiet=True,
             )
             return _text(result, is_error=not result.get("ok"))
         if name == "playlist_index_job_status":

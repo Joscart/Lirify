@@ -12,6 +12,7 @@ import math
 import os
 import re
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
@@ -20,6 +21,7 @@ import numpy as np
 import requests
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 try:
@@ -46,8 +48,8 @@ VECTORS = get_vector_store()
 MAX_ATTEMPTS = int(os.environ.get("MAX_JOB_ATTEMPTS", "8"))
 # Cloud Run free tier gives this container 512 MiB. The in-process TF-IDF index
 # costs O(vocabulary x songs) plus O(songs^2) matrices; refuse to commit past the
-# guard instead of being OOM-killed mid-batch.
-MAX_INDEXED_SONGS = int(os.environ.get("MAX_INDEXED_SONGS", "1500"))
+# guard instead of being OOM-killed mid-batch. -1 disables the guard (local only).
+MAX_INDEXED_SONGS = int(os.environ.get("MAX_INDEXED_SONGS", "1000"))
 RETRY_INTERVAL = int(os.environ.get("RETRY_INTERVAL_SECONDS", "300"))
 QUEUE_DIRTY = False
 
@@ -65,6 +67,79 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Public REST surface is readable by anyone (the index is public data) but rate
+# limited per client IP. Writes go through the bearer-protected bot API, which has
+# its own quota. Both limits are disabled with 0 (local compose).
+PUBLIC_RATE_LIMIT = int(os.environ.get("PUBLIC_RATE_LIMIT_PER_MINUTE", "120"))
+PUBLIC_RATE_WINDOW = 60
+RATE_EXEMPT = {
+    "/health",
+    "/healthz",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+}
+
+
+class IpRateLimiter:
+    """Per-IP fixed window. In-process on purpose: the free tier runs one instance,
+    so this costs no database round-trip on the hot read path."""
+
+    def __init__(self, limit: int, window: int) -> None:
+        self.limit = limit
+        self.window = window
+        self.buckets: Dict[str, tuple] = {}
+        self.lock = threading.Lock()
+
+    def hit(self, key: str) -> tuple:
+        if self.limit <= 0:
+            return True, 0, 0
+        now = time.time()
+        with self.lock:
+            count, reset = self.buckets.get(key, (0, now + self.window))
+            if reset <= now:
+                count, reset = 0, now + self.window
+            count += 1
+            self.buckets[key] = (count, reset)
+            if len(self.buckets) > 10_000:
+                for stale in [k for k, (_, r) in self.buckets.items() if r <= now][:5000]:
+                    self.buckets.pop(stale, None)
+        return count <= self.limit, count, max(0, int(reset - now))
+
+
+PUBLIC_LIMITER = IpRateLimiter(PUBLIC_RATE_LIMIT, PUBLIC_RATE_WINDOW)
+
+
+def _client_ip(request) -> str:
+    forwarded = request.headers.get("x-forwarded-for") or ""
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def public_rate_limit(request, call_next):
+    path = request.url.path
+    if PUBLIC_LIMITER.limit <= 0 or path in RATE_EXEMPT or path.startswith("/api/v1/bot"):
+        return await call_next(request)
+    allowed, count, reset = PUBLIC_LIMITER.hit(_client_ip(request))
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": {
+                    "code": "rate_limited",
+                    "message": f"Limit is {PUBLIC_LIMITER.limit} requests per {PUBLIC_LIMITER.window}s per IP",
+                    "retry_after_seconds": reset,
+                }
+            },
+            headers={"Retry-After": str(reset)},
+        )
+    response = await call_next(request)
+    response.headers["X-RateLimit-Limit"] = str(PUBLIC_LIMITER.limit)
+    response.headers["X-RateLimit-Remaining"] = str(max(0, PUBLIC_LIMITER.limit - count))
+    return response
 
 STATE: Dict[str, Any] = {
     "songs": [],
@@ -860,7 +935,7 @@ async def stage_matrix(batch: Dict[str, Any]) -> None:
                 )
                 return
 
-            if len(combined) > MAX_INDEXED_SONGS:
+            if MAX_INDEXED_SONGS >= 0 and len(combined) > MAX_INDEXED_SONGS:
                 await asyncio.to_thread(remove_stash, job_id)
                 JOBS[job_id].update(
                     status="error", stage="matrix", error="index capacity guard"
@@ -957,34 +1032,38 @@ async def enqueue_playlist(url: str, limit: Optional[int] = None, source: str = 
     return job_id
 
 
-async def requeue_playlist(item: Dict[str, Any], reason: str) -> None:
-    """Retry a failed playlist with a bounded exponential backoff."""
-    job_id = item["job_id"]
+async def _finish_failed_playlist(job_id: str, reason: str) -> None:
+    """End a failed playlist job and hand the retry decision to the agent.
+
+    The server deliberately does not schedule scrape retries. YouTube's anti-bot
+    challenge is time- and egress-dependent, and a retry loop here would burn the
+    free-tier quota without changing the outcome. Agents resubmit through the bot
+    API after a randomised delay (see skills/lirify-playlist-indexer).
+    """
     job = JOBS.setdefault(job_id, {"job_id": job_id, "created_at": time.time()})
-    attempts = int(job.get("attempts", item.get("attempts", 0))) + 1
-    job.update(attempts=attempts, error=reason, updated_at=time.time())
-    if attempts > MAX_ATTEMPTS:
-        job.update(status="error", stage="gave_up", error=reason)
-        await _emit(
-            job_id,
-            "gave_up",
-            attempts=attempts,
-            message=f"Gave up after {MAX_ATTEMPTS} attempts: {reason}",
-        )
-        return
-    job.update(status="retry_wait", stage="backoff")
-    delay = min(60, 2 ** attempts)
+    failure = classify_playlist_error(reason)
+    job.update(
+        status="error",
+        stage="gave_up",
+        error=reason,
+        error_code=failure["code"],
+        retry_mode=failure.get("retry_mode"),
+        updated_at=time.time(),
+    )
     await _emit(
         job_id,
-        "retry_scheduled",
-        attempts=attempts,
-        delay=delay,
-        message=f"Retrying in {delay}s: {reason}",
+        "gave_up",
+        attempts=int(job.get("attempts", 0)),
+        code=failure["code"],
+        retry_mode=failure.get("retry_mode"),
+        retryable=failure.get("retryable"),
+        retry_window_seconds=failure.get("retry_window_seconds"),
+        message=(
+            f"{failure['hint']} Resubmit through the bot API if the agent decides to retry."
+            if failure.get("retryable")
+            else failure["hint"]
+        ),
     )
-    await asyncio.sleep(delay)
-    job.update(status="queued", stage="queued")
-    await PLAYLIST_QUEUE.put(dict(item, attempts=attempts))
-    await _emit(job_id, "requeued", attempts=attempts, queue_size=PLAYLIST_QUEUE.qsize())
 
 
 async def index_worker() -> None:
@@ -1004,26 +1083,9 @@ async def index_worker() -> None:
                     matrix_queue=MATRIX_QUEUE.qsize(),
                 )
             elif job.get("status") == "error":
-                if job.get("error_code") in TERMINAL_ERRORS:
-                    # Deterministic failures (private, deleted, geo-blocked) would
-                    # burn the free-tier quota on a guaranteed repeat failure.
-                    JOBS[item["job_id"]].update(status="error", stage="gave_up")
-                    await _emit(
-                        item["job_id"],
-                        "gave_up",
-                        attempts=job.get("attempts", 0),
-                        code=job.get("error_code"),
-                        message="Not retrying a terminal playlist error",
-                    )
-                else:
-                    asyncio.create_task(
-                        requeue_playlist(item, job.get("error") or "index failed")
-                    )
+                await _finish_failed_playlist(item["job_id"], job.get("error") or "index failed")
         except Exception as exc:
-            JOBS.setdefault(item["job_id"], {})
-            JOBS[item["job_id"]].update(status="error", error=str(exc))
-            await _emit(item["job_id"], "error", message=str(exc))
-            asyncio.create_task(requeue_playlist(item, str(exc)))
+            await _finish_failed_playlist(item["job_id"], str(exc))
         finally:
             PLAYLIST_QUEUE.task_done()
 
@@ -1543,6 +1605,11 @@ def stats():
             "vectors": VECTORS.backend,
             "stateless": True,
             "max_indexed_songs": MAX_INDEXED_SONGS,
+        },
+        "limits": {
+            "public_read_per_minute": PUBLIC_RATE_LIMIT,
+            "bot_per_window": int(os.environ.get("BOT_RATE_LIMIT", "30")),
+            "bot_window_seconds": int(os.environ.get("BOT_RATE_WINDOW_SECONDS", "3600")),
         },
         "top_terms": sorted(
             STATE.get("vocab", []),
