@@ -126,6 +126,8 @@ async def _abort(context: Any, code: "grpc.StatusCode", message: str) -> None:
 class LirifyServicer(pb_grpc.LirifyServiceServicer):
     # -- player ---------------------------------------------------------
     async def Search(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         query = request.query or ""
         limit = request.limit or 20
         payload = await asyncio.to_thread(core.search, query, limit)
@@ -146,6 +148,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         )
 
     async def Recommend(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         seeds = [request.video_id] if request.video_id else []
         seeds += [s for s in request.seed_video_ids if s]
         payload = await asyncio.to_thread(
@@ -166,12 +170,16 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         )
 
     async def GetTrack(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         song = _find_song(request.video_id)
         if song is None:
             await _abort(context, grpc.StatusCode.NOT_FOUND, "Unknown video id")
         return pb.GetTrackResponse(track=_track(song, request.include_lyrics))
 
     async def ListTracks(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         songs: List[Dict[str, Any]] = core.STATE.get("songs") or []
         language = (request.language or "").strip()
         if language:
@@ -185,6 +193,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         )
 
     async def GetLyrics(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         song = _find_song(request.video_id)
         if song is None:
             await _abort(context, grpc.StatusCode.NOT_FOUND, "Unknown video id")
@@ -205,6 +215,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         )
 
     async def Stream(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         song = _find_song(request.video_id)
         if song is None:
             await _abort(context, grpc.StatusCode.NOT_FOUND, "Unknown video id")
@@ -279,9 +291,13 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         return pb.ExtractVideoIdsResponse(count=len(ids), video_ids=ids)
 
     async def GetIndexStats(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         return await self._stats_message()
 
     async def WatchIndexStats(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         interval = max(2, min(int(request.interval_seconds or 5), 60))
         while True:
             # aio ServicerContext exposes cancelled(), not is_active().
@@ -320,6 +336,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         )
 
     async def GetFailedSongs(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         failed = await asyncio.to_thread(core.STORE.failed_all)
         cached = await asyncio.to_thread(core.STORE.cached_lyric_count)
         limit = max(1, min(int(request.limit or 100), 500))
@@ -366,6 +384,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         )
 
     async def MatrixPreview(self, request, context):  # noqa: N802
+        # gRPC bypasses the FastAPI middleware; refresh from the shared store too.
+        await core.ensure_fresh_index()
         payload = await asyncio.to_thread(
             player_api.preview_matrices, core.STATE, int(request.size or 12)
         )

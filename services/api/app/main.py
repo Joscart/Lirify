@@ -67,6 +67,12 @@ MONGO_ERROR = ""
 # indexing into the same Atlas/Qdrant).
 STATE_REV = 0
 REFRESH_INTERVAL = int(os.environ.get("INDEX_REFRESH_SECONDS", "60"))
+# Cloud Run bills per request and throttles CPU between requests, so a background
+# poller can be frozen indefinitely. Any inbound request also checks the shared
+# revision (at most once per INDEX_CHECK_SECONDS) and re-hydrates if it moved.
+FRESHNESS_CHECK_SECONDS = float(os.environ.get("INDEX_CHECK_SECONDS", "10"))
+_LAST_REV_CHECK = 0.0
+_RELOAD_LOCK = asyncio.Lock()
 
 app = FastAPI(title="Lirify API", version="1.0.0")
 app.add_middleware(
@@ -128,6 +134,9 @@ def _client_ip(request) -> str:
 
 @app.middleware("http")
 async def public_rate_limit(request, call_next):
+    # Runs before the limiter/early-returns so every inbound request (health,
+    # bot, exempt paths) can notice a newer index revision.
+    await ensure_fresh_index()
     path = request.url.path
     if PUBLIC_LIMITER.limit <= 0 or path in RATE_EXEMPT or path.startswith("/api/v1/bot"):
         return await call_next(request)
@@ -1068,6 +1077,32 @@ async def enqueue_playlist(url: str, limit: Optional[int] = None, source: str = 
     return job_id
 
 
+async def ensure_fresh_index() -> None:
+    """Reload the index if another instance committed since we loaded it.
+
+    Cheap path: one indexed lookup on `index_stats` at most every
+    INDEX_CHECK_SECONDS. Expensive path (only on a real change): rebuild STATE,
+    which takes a few seconds for a few thousand songs. Serialised by a lock so
+    concurrent requests cannot stampede.
+    """
+    global _LAST_REV_CHECK
+    now = time.monotonic()
+    if FRESHNESS_CHECK_SECONDS > 0 and now - _LAST_REV_CHECK < FRESHNESS_CHECK_SECONDS:
+        return
+    _LAST_REV_CHECK = now
+    try:
+        revision = await asyncio.to_thread(STORE.stats_revision)
+    except Exception:
+        return
+    if revision <= STATE_REV:
+        return
+    async with _RELOAD_LOCK:
+        if revision <= STATE_REV:
+            return
+        print(f"[lirify] index revision {revision} > {STATE_REV}; reloading on request", flush=True)
+        await asyncio.to_thread(load_state)
+
+
 async def _finish_failed_playlist(job_id: str, reason: str) -> None:
     """End a failed playlist job and hand the retry decision to the agent.
 
@@ -1547,7 +1582,8 @@ async def ws_progress(ws: WebSocket):
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
-def health():
+async def health():
+    await ensure_fresh_index()
     return {
         "status": "ok",
         "indexed_songs": len(STATE["songs"]),
