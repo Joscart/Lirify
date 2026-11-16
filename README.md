@@ -111,8 +111,9 @@ Smoke test the stack:
 ```bash
 curl localhost:8000/health          # {"storage":{"tracks":"mongodb","vectors":"qdrant"}}
 curl localhost:8000/stats
-curl localhost:8080/healthz         # go-webui -> gRPC -> python-backend
-curl localhost:4321/healthz         # astro-webui
+curl localhost:8080/health          # go-webui process
+curl localhost:8080/readyz          # go-webui -> gRPC -> python-backend
+curl localhost:4321/health          # astro-webui
 curl -H "Authorization: Bearer $BOT_INGEST_API_KEY" localhost:8000/api/v1/bot/health
 ```
 

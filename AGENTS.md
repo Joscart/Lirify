@@ -17,7 +17,7 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   `docker compose -f docker-compose.yml -f docker-compose.local-db.yml up -d --build`
   which also starts `mongo`, `db-init`, `qdrant` and `api`
   (8000 → REST + gRPC h2c behind the in-container mux, 50051 direct gRPC),
-  `go-ui` (8080), `web` (4321). Configuration comes from `.env` (copy
+  `go-ui` (8080), `web` (4321 host → 8080 container). Configuration comes from `.env` (copy
   `.env.example`); `db-init` creates the database + app user before the API boots.
 - Local compose runs unlimited on purpose: `MAX_INDEXED_SONGS=-1`,
   `PUBLIC_RATE_LIMIT_PER_MINUTE=0`, `BOT_RATE_LIMIT=0`. Production uses 1000 /
@@ -31,8 +31,8 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   - `cd services/web && npm run build`
   - `./scripts/gen_proto.sh --check` (fails if generated stubs drift)
 - Smoke-test: `curl localhost:8000/health`, `/stats`, `/queue`, `/cache`,
-  `/providers`, `/api/v1/bot/health`; then `curl localhost:8080/healthz` and
-  `curl localhost:4321/healthz`.
+  `/providers`, `/api/v1/bot/health`; then `curl localhost:8080/health` (process), `curl localhost:8080/readyz`
+  (gRPC to python-backend) and `curl localhost:4321/health`.
 - gRPC check: `grpcurl -proto proto/lirify.proto -plaintext localhost:8000 \
   lirify.v1.LirifyService/GetIndexStats`.
 - Index via the Go UI, `docker compose exec api python ws_client.py "<url>" index [limit]`,

@@ -27,7 +27,7 @@
 
 		# Player endpoints are owned by the Astro SSR layer (gRPC to python-backend).
 		handle /api/player/* {
-			reverse_proxy web:4321
+			reverse_proxy web:8080
 		}
 
 		# Core API is exposed under /api but FastAPI serves it at the root.
@@ -44,7 +44,7 @@
 		}
 
 		handle {
-			reverse_proxy web:4321
+			reverse_proxy web:8080
 		}
 	}
 }

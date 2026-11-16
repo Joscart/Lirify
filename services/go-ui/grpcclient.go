@@ -113,7 +113,7 @@ func dialBackend(cfg Config) (*Client, error) {
 	}
 
 	// NewClient is non-blocking: the first RPC establishes the connection, so a
-	// Cloud Run cold start can serve /healthz before python-backend wakes up.
+	// Cloud Run cold start can serve /health before python-backend wakes up.
 	conn, err := grpc.NewClient(cfg.GRPCTarget, opts...)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (c *Client) context(parent context.Context) (context.Context, context.Cance
 	return context.WithTimeout(parent, c.cfg.CallTimeout)
 }
 
-// Ping is used by /healthz and does not require an index.
+// Ping is used by /readyz and does not require an index.
 func (c *Client) Ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()

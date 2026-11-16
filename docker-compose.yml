@@ -53,13 +53,13 @@ services:
     container_name: lirify-web
     environment:
       HOST: 0.0.0.0
-      PORT: "4321"
+      PORT: "8080"
       GRPC_TARGET: api:50051
       GRPC_INSECURE: "true"
       PYTHON_BACKEND_URL: http://api:8080
       PROTO_PATH: /app/proto/lirify.proto
     ports:
-      - "4321:4321"
+      - "4321:8080"   # host 4321 -> container 8080 (Cloud Run's port)
     depends_on:
       api:
         condition: service_healthy
