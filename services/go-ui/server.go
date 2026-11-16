@@ -31,8 +31,11 @@ type templateExecutor interface {
 
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /", s.index)
-	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /readyz", s.ready)
+	// Kept for container-local probes only: the *.run.app edge intercepts
+	// /healthz with its own 404 page, so it must not be the public endpoint.
+	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /api/config", s.config)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/queue", s.queue)

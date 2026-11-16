@@ -329,7 +329,7 @@ resource "google_cloud_run_v2_service" "web" {
 
       startup_probe {
         http_get {
-          path = "/healthz"
+          path = "/health"
           port = 8080
         }
         initial_delay_seconds = 3
@@ -340,7 +340,7 @@ resource "google_cloud_run_v2_service" "web" {
 
       liveness_probe {
         http_get {
-          path = "/healthz"
+          path = "/health"
           port = 8080
         }
         period_seconds    = 60
@@ -412,7 +412,7 @@ resource "google_cloud_run_v2_service" "go" {
 
       startup_probe {
         http_get {
-          path = "/healthz"
+          path = "/health"
           port = 8080
         }
         initial_delay_seconds = 2
@@ -423,7 +423,7 @@ resource "google_cloud_run_v2_service" "go" {
 
       liveness_probe {
         http_get {
-          path = "/healthz"
+          path = "/health"
           port = 8080
         }
         period_seconds    = 60
