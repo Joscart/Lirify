@@ -596,9 +596,18 @@ class MongoStore(Store):
         return doc.get("build") or {}
 
     def stats_put(self, build: Dict[str, Any]) -> None:
-        self.db[COLLECTIONS["stats"]].replace_one(
+        # update_one, not replace_one: replacing the document would drop the
+        # `revision` counter, so replicas could never detect a newer index.
+        self.db[COLLECTIONS["stats"]].update_one(
             {"_id": "global"},
-            {"build": build, "updatedAt": _now(), "schemaVersion": SCHEMA_VERSION},
+            {
+                "$set": {
+                    "build": build,
+                    "updatedAt": _now(),
+                    "schemaVersion": SCHEMA_VERSION,
+                },
+                "$setOnInsert": {"revision": 0},
+            },
             upsert=True,
         )
 

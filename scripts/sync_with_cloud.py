@@ -67,15 +67,23 @@ def request(method: str, url: str, key: str = "", payload: dict | None = None, t
 
 
 def stats(base: str) -> dict:
-    status, body = request("GET", f"{base.rstrip('/')}/health", timeout=30)
+    """/health for liveness + /stats for the storage details (catalog, cap)."""
+    base = base.rstrip("/")
+    status, body = request("GET", f"{base}/health", timeout=30)
     if status != 200:
         return {"reachable": False, "http": status, "detail": str(body)[:200]}
     storage = body.get("storage") or {}
+    catalog = cap = None
+    detail_status, detail = request("GET", f"{base}/stats", timeout=30)
+    if detail_status == 200:
+        storage = (detail.get("storage") or storage)
+        catalog = storage.get("catalog_songs")
+        cap = storage.get("max_indexed_songs")
     return {
         "reachable": True,
         "indexed": body.get("indexed_songs", 0),
-        "catalog": storage.get("catalog_songs"),
-        "cap": storage.get("max_indexed_songs"),
+        "catalog": catalog,
+        "cap": cap,
         "grpc": body.get("grpc"),
         "mongo": body.get("mongo"),
         "vectors": storage.get("vectors"),
