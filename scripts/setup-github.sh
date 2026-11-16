@@ -13,7 +13,7 @@
 #   export INDEX_DOMAIN=index.lirify.joscart.win
 #   export ENABLE_DOMAIN_MAPPINGS=false
 #   export MONGODB_URI=... QDRANT_URL=... QDRANT_API_KEY=... BOT_INGEST_API_KEY=...
-#   ./scripts/setup-github.sh [--repo owner/name] [--env production] [--check]
+#   ./scripts/setup-github.sh [--repo owner/name] [--env Lirify] [--check]
 #
 # --env NAME      store variables/secrets on that GitHub environment instead of
 #                 the repository. The workflow declares `environment:` on every
@@ -52,7 +52,7 @@ if ((CHECK_ONLY)); then
     gh secret list --env "$ENV_NAME" "${REPO_ARGS[@]}" 2>/dev/null || true
   fi
   echo
-  echo "The workflow reads '$ENV_NAME' (DEPLOY_ENVIRONMENT or 'production')."
+  echo "The workflow reads '$ENV_NAME' (DEPLOY_ENVIRONMENT or 'Lirify')."
   echo "Values at the other level are invisible to it."
   exit 0
 fi

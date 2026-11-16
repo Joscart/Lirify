@@ -111,7 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     # Reads repository AND environment-scoped variables/secrets, so it must
     # declare the same environment as the jobs it gates.
-    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}
     steps:
       - name: Check repository variables and secrets
         env:
@@ -142,7 +142,7 @@ jobs:
             echo
             echo "Configured at the WRONG LEVEL? Variables and secrets stored on an"
             echo "environment are only visible to jobs that declare it. This workflow"
-            echo "uses '${{ vars.DEPLOY_ENVIRONMENT || 'production' }}'."
+            echo "uses '${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}'."
             echo "  repository level : gh variable set NAME --body VALUE"
             echo "  environment level: gh variable set NAME --env production --body VALUE"
             echo "  list what exists : gh variable list / gh secret list [--env production]"
@@ -161,7 +161,7 @@ jobs:
     name: Build and push images
     needs: [verify, preflight]
     runs-on: ubuntu-latest
-    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}
     outputs:
       python: ${{ steps.refs.outputs.python }}
       web: ${{ steps.refs.outputs.web }}
@@ -240,7 +240,7 @@ jobs:
     name: Terraform apply
     needs: [images, preflight]
     runs-on: ubuntu-latest
-    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}
     defaults:
       run:
         working-directory: infra
@@ -307,7 +307,7 @@ jobs:
     name: Smoke test
     needs: [images, deploy]
     runs-on: ubuntu-latest
-    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}
     steps:
       - id: auth
         uses: google-github-actions/auth@v2

@@ -141,13 +141,13 @@ This value is the bearer token AI agents use. It is stored in Secret Manager as
 **Settings → Secrets and variables → Actions.**
 
 > **Where to store them.** Every job that reads configuration declares
-> `environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}`. That means
+> `environment: ${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}`. That means
 > repository-level and `production`-environment-level values both work — but only
 > the level you chose. The classic symptom of a mismatch is a preflight failure
 > listing **all** variables and secrets as missing. Choose one and stay there:
 > `scripts/setup-github.sh` (repository level) or
-> `scripts/setup-github.sh --env production` (environment level).
-> `scripts/setup-github.sh --check [--env production]` shows what exists where.
+> `scripts/setup-github.sh --env Lirify` (environment level).
+> `scripts/setup-github.sh --check [--env Lirify]` shows what exists where.
 
 ### Repository variables (non-secret)
 

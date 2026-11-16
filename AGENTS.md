@@ -124,7 +124,7 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   `scripts/migrate_json_to_mongo.py` (idempotent upserts, matrices excluded).
 - GitHub-wise: variables/secrets on an *environment* are invisible to jobs that
   do not declare it. All configuration-consuming jobs declare
-  `production` (override with a repository variable `DEPLOY_ENVIRONMENT`).
+  `Lirify` (override with a repository variable `DEPLOY_ENVIRONMENT`).
   A preflight failure that lists every variable/secret is a level mismatch, not
   an empty config — check with `scripts/setup-github.sh --check`.
 - After editing Python code, `docker compose up -d api` is not enough: run
