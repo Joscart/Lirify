@@ -1,0 +1,55 @@
+# Lirify public edge for the local/hosted docker-compose profile.
+#
+# Cloud Run does not use this file: there, Cloud Run domain mappings and managed
+# certificates terminate TLS for each service. This edge is for running the whole
+# stack on a single host with `docker compose --profile public up -d`.
+#
+#   https://lirify.joscart.win        -> astro-webui (SSR player, proxies /api/player)
+#   https://lirify.joscart.win/api/v1/bot/*  -> python-backend REST (bot ingestion)
+#   https://lirify.joscart.win/api/*         -> python-backend core API (prefix stripped)
+#   https://index.liirify.joscart.win        -> go-webui (playlist indexer dashboard)
+#
+# HTTPS certificates are issued automatically once DNS points here and ports
+# 80/443 are reachable.
+
+{
+	email {$LIRIFY_EMAIL:admin@lirify.joscart.win}
+}
+
+{$LIRIFY_DOMAIN:lirify.joscart.win} {
+	encode zstd gzip
+
+	route {
+		# Bot ingestion keeps its full path: FastAPI mounts it at /api/v1/bot.
+		handle /api/v1/bot/* {
+			reverse_proxy api:8080
+		}
+
+		# Player endpoints are owned by the Astro SSR layer (gRPC to python-backend).
+		handle /api/player/* {
+			reverse_proxy web:4321
+		}
+
+		# Core API is exposed under /api but FastAPI serves it at the root.
+		handle_path /api/* {
+			reverse_proxy api:8080
+		}
+
+		handle /openapi.json {
+			reverse_proxy api:8080
+		}
+
+		handle /docs {
+			reverse_proxy api:8080
+		}
+
+		handle {
+			reverse_proxy web:4321
+		}
+	}
+}
+
+{$LIRIFY_INDEX_DOMAIN:index.liirify.joscart.win} {
+	encode zstd gzip
+	reverse_proxy go-ui:8080
+}

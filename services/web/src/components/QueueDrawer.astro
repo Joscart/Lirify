@@ -1,0 +1,47 @@
+---
+import Icon from "./Icon.astro";
+---
+
+<aside class="queue-drawer" id="queue-drawer" aria-label="Queue" aria-hidden="true">
+  <div class="queue-head">
+    <h2>Playback queue</h2>
+    <span class="spacer"></span>
+    <button class="icon-btn tiny" id="queue-clear" aria-label="Clear upcoming tracks" data-tip="Clear">
+      <Icon name="trash" size={15} />
+    </button>
+    <button class="icon-btn tiny" id="queue-close" aria-label="Close queue">
+      <Icon name="close" size={15} />
+    </button>
+  </div>
+
+  <div class="queue-tabs" role="tablist">
+    <button class="queue-tab is-active" data-queue-tab="queue" role="tab" aria-selected="true">Queue</button>
+    <button class="queue-tab" data-queue-tab="related" role="tab" aria-selected="false">Related</button>
+  </div>
+
+  <div class="queue-body" id="queue-body">
+    <section data-panel="queue">
+      <div class="queue-label"><span>Now playing</span></div>
+      <div id="queue-now"></div>
+      <div class="queue-label">
+        <span>Next up</span>
+        <span id="queue-count"></span>
+      </div>
+      <div id="queue-next"></div>
+      <div class="queue-label" data-queue-history-label hidden><span>Played before</span></div>
+      <div id="queue-history"></div>
+    </section>
+    <section data-panel="related" hidden>
+      <div class="queue-label"><span>Because you're listening to this</span></div>
+      <div id="queue-related"></div>
+    </section>
+  </div>
+
+  <div class="queue-foot">
+    <button class="switch is-on" id="queue-automix" role="switch" aria-checked="true" aria-label="Automix"></button>
+    <div class="switch-label">
+      <b>Automix</b>
+      <span>Keep the queue going with similar tracks</span>
+    </div>
+  </div>
+</aside>

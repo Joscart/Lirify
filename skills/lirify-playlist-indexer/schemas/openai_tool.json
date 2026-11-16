@@ -1,0 +1,34 @@
+{
+  "type": "function",
+  "function": {
+    "name": "index_youtube_playlist",
+    "description": "Queue a public YouTube playlist for lyric indexing in Lirify. Returns a job id and, when wait is true, the final job status. Handles invalid URLs, auth failures, rate limits and private/deleted playlists with a machine-readable error code.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "playlist_url": {
+          "type": "string",
+          "description": "Public YouTube playlist URL (youtube.com/playlist?list=..., music.youtube.com/playlist?list=..., youtube.com/watch?v=...&list=...) or a bare playlist id."
+        },
+        "source_bot": {
+          "type": "string",
+          "description": "Name of the agent submitting the playlist; stored on the job for audit.",
+          "default": "ai-agent"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Index at most N videos from the playlist. Omit for the whole playlist."
+        },
+        "wait": {
+          "type": "boolean",
+          "default": true,
+          "description": "Poll until the job commits or fails. Set false for fire-and-forget."
+        }
+      },
+      "required": ["playlist_url"],
+      "additionalProperties": false
+    }
+  }
+}

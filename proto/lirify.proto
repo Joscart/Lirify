@@ -1,0 +1,313 @@
+// Lirify shared gRPC contract.
+//
+// Single source of truth for every service boundary:
+//
+//   astro-webui  (lirify.joscart.win)        -> Search / Recommend / GetTrack /
+//                                               GetLyrics / ListTracks / Stream
+//   go-webui     (index.<domain>)            -> IndexPlaylist / QueuePlaylists /
+//                                               GetJob / GetIndexStats / WatchIndexStats
+//   external AI bot (HTTP/JSON gateway)      -> IndexPlaylistFromBot
+//
+// python-backend is the only process that owns MongoDB Atlas and Qdrant Cloud.
+// Neither web UI ever dials a database.
+//
+// Code generation (see scripts/gen_proto.sh):
+//   python: services/api/app/lirifypb/
+//   go:     services/go-ui/internal/lirifypb/
+//   ts:     services/web/src/generated/
+syntax = "proto3";
+
+package lirify.v1;
+
+option go_package = "lirify/go-ui/internal/lirifypb;lirifypb";
+
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
+
+// A fully hydrated track. `lyrics` is only populated when requested.
+message Track {
+  string video_id = 1;
+  string title = 2;          // Normalised track title.
+  string artist = 3;
+  string language = 4;       // en | es (index filter).
+  string backend = 5;        // Lyrics provider that resolved the track.
+  string youtube_title = 6;  // Original YouTube title.
+  double duration = 7;       // Seconds, 0 when unknown.
+  string lyrics = 8;
+  bool synced = 9;           // Lyrics contain LRC timestamps.
+  string thumb = 10;
+  string stream_url = 11;    // Relative player-proxy path, or empty.
+}
+
+// Lightweight ranked result used by search and recommendation responses.
+message TrackSummary {
+  string video_id = 1;
+  string title = 2;
+  string artist = 3;
+  string language = 4;
+  double score = 5;
+  string thumb = 6;
+  double duration = 7;
+}
+
+message Job {
+  string job_id = 1;
+  string action = 2;         // index | queue | extract | retry_failed
+  string url = 3;
+  string status = 4;         // queued | indexing | matrix_pending | committed | skipped | error
+  string stage = 5;
+  string error = 6;
+  int32 added = 7;
+  int32 attempts = 8;
+  string source = 9;         // go-webui | bot:<name> | manual
+  int64 created_at = 10;     // unix seconds
+  int64 updated_at = 11;     // unix seconds
+}
+
+// ---------------------------------------------------------------------------
+// astro-webui -> python-backend
+// ---------------------------------------------------------------------------
+
+message SearchRequest {
+  string query = 1;
+  int32 limit = 2;           // 0 -> server default (20)
+}
+
+message SearchResponse {
+  string query = 1;
+  repeated TrackSummary results = 2;
+}
+
+message RecommendRequest {
+  // Preferred seed. Empty is allowed when seed_video_ids is provided.
+  string video_id = 1;
+  int32 limit = 2;
+  // Browser-owned listening history, newest first. Lets a cold client ask for
+  // recommendations without any server-side user profile.
+  repeated string seed_video_ids = 3;
+}
+
+message RecommendResponse {
+  string seed_video_id = 1;
+  repeated TrackSummary recommendations = 2;
+  // "qdrant" | "matrix" (in-process fallback)
+  string engine = 3;
+}
+
+message GetTrackRequest {
+  string video_id = 1;
+  bool include_lyrics = 2;
+}
+
+message GetTrackResponse {
+  Track track = 1;
+}
+
+message ListTracksRequest {
+  int32 offset = 1;
+  int32 limit = 2;           // 0 -> server default (60)
+  string language = 3;       // empty -> all indexed languages
+}
+
+message ListTracksResponse {
+  int32 total = 1;
+  repeated Track tracks = 2;
+}
+
+message LyricsLine {
+  int64 time_ms = 1;
+  string text = 2;
+}
+
+message GetLyricsRequest {
+  string video_id = 1;
+}
+
+message GetLyricsResponse {
+  string video_id = 1;
+  bool synced = 2;
+  repeated LyricsLine lines = 3;
+  string raw = 4;
+  string language = 5;
+}
+
+message StreamRequest {
+  string video_id = 1;
+  bool probe = 2;
+}
+
+message StreamResponse {
+  string video_id = 1;
+  // Absolute or root-relative URL the browser can play directly.
+  string url = 2;
+  double duration = 3;
+  int64 expires_at = 4;      // unix seconds; 0 when the URL does not expire
+}
+
+// ---------------------------------------------------------------------------
+// go-webui -> python-backend
+// ---------------------------------------------------------------------------
+
+message IndexPlaylistRequest {
+  string playlist_url = 1;
+  int32 limit = 2;           // 0 -> every video in the playlist
+  string source = 3;         // operator label, e.g. "go-webui"
+}
+
+message QueuePlaylistsRequest {
+  repeated string playlist_urls = 1;
+  int32 limit = 2;
+  string source = 3;
+}
+
+message QueuePlaylistsResponse {
+  repeated Job jobs = 1;
+  int32 queue_size = 2;
+}
+
+message GetJobRequest {
+  string job_id = 1;
+}
+
+message ExtractVideoIdsRequest {
+  string playlist_url = 1;
+  int32 limit = 2;
+}
+
+message ExtractVideoIdsResponse {
+  int32 count = 1;
+  repeated string video_ids = 2;
+}
+
+message GetJobResponse {
+  Job job = 1;
+}
+
+message GetIndexStatsRequest {}
+
+message IndexStats {
+  int32 indexed_songs = 1;
+  int32 video_ids = 2;
+  int32 vocabulary_size = 3;
+  int32 inverted_terms = 4;
+  int64 lyrics_tokens = 5;
+  map<string, int32> languages = 6;
+  map<string, int32> backends = 7;
+  int32 playlist_pending = 8;
+  int32 matrix_pending = 9;
+  int32 failed_songs = 10;
+  int32 cached_lyrics = 11;
+  repeated Job jobs = 12;
+  repeated string matrices_available = 13;
+  map<string, double> weights = 14;
+  int64 generated_at = 15;   // unix seconds
+  repeated string lyrics_providers = 16;
+  repeated string top_terms = 17;
+  bool stateless = 18;
+  string tracks_store = 19;  // mongodb | memory
+  string vectors_store = 20; // qdrant | none
+  int32 max_indexed_songs = 21;
+}
+
+message WatchIndexStatsRequest {
+  int32 interval_seconds = 1; // clamped to [2, 60]
+}
+
+message FailedSong {
+  string video_id = 1;
+  string title = 2;
+  string artist = 3;
+  string reason = 4;
+  int32 attempts = 5;
+  int64 last_try = 6;        // unix seconds
+  double duration = 7;
+}
+
+message GetFailedSongsRequest {
+  int32 limit = 1;
+}
+
+message GetFailedSongsResponse {
+  int32 total = 1;
+  int32 cached_lyrics = 2;
+  int32 max_attempts = 3;
+  int32 retry_interval_seconds = 4;
+  repeated FailedSong failed = 5;
+}
+
+message RetryFailedRequest {}
+
+message RetryFailedResponse {
+  bool started = 1;
+  bool already_running = 2;
+  string message = 3;
+}
+
+message MatrixPreviewRequest {
+  int32 size = 1;
+}
+
+message MatrixPreviewRow {
+  repeated double values = 1;
+}
+
+message MatrixPreview {
+  repeated int32 shape = 1;
+  repeated MatrixPreviewRow rows = 2;
+}
+
+message MatrixPreviewResponse {
+  repeated int32 shape = 1;
+  int32 size = 2;
+  repeated TrackSummary songs = 3;
+  map<string, MatrixPreview> matrices = 4;
+  map<string, double> weights = 5;
+}
+
+// ---------------------------------------------------------------------------
+// external AI bot -> python-backend
+// ---------------------------------------------------------------------------
+
+message IndexPlaylistFromBotRequest {
+  string playlist_url = 1;
+  string source_bot = 2;
+  // Optional client-generated key so a retried submission is not enqueued twice.
+  string idempotency_key = 3;
+  int32 limit = 4;
+}
+
+message IndexPlaylistFromBotResponse {
+  bool accepted = 1;
+  Job job = 2;
+  // GET path the bot can poll for job status.
+  string job_status_url = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+service LirifyService {
+  // --- player surface -------------------------------------------------------
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc Recommend(RecommendRequest) returns (RecommendResponse);
+  rpc GetTrack(GetTrackRequest) returns (GetTrackResponse);
+  rpc ListTracks(ListTracksRequest) returns (ListTracksResponse);
+  rpc GetLyrics(GetLyricsRequest) returns (GetLyricsResponse);
+  rpc Stream(StreamRequest) returns (StreamResponse);
+
+  // --- indexing surface -----------------------------------------------------
+  rpc IndexPlaylist(IndexPlaylistRequest) returns (Job);
+  rpc QueuePlaylists(QueuePlaylistsRequest) returns (QueuePlaylistsResponse);
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc ExtractVideoIds(ExtractVideoIdsRequest) returns (ExtractVideoIdsResponse);
+  rpc GetIndexStats(GetIndexStatsRequest) returns (IndexStats);
+  rpc WatchIndexStats(WatchIndexStatsRequest) returns (stream IndexStats);
+  rpc GetFailedSongs(GetFailedSongsRequest) returns (GetFailedSongsResponse);
+  rpc RetryFailed(RetryFailedRequest) returns (RetryFailedResponse);
+  rpc MatrixPreview(MatrixPreviewRequest) returns (MatrixPreviewResponse);
+
+  // --- bot surface ----------------------------------------------------------
+  rpc IndexPlaylistFromBot(IndexPlaylistFromBotRequest) returns (IndexPlaylistFromBotResponse);
+}

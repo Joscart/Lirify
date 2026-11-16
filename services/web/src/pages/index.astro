@@ -1,0 +1,41 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Sidebar from "../components/Sidebar.astro";
+import Topbar from "../components/Topbar.astro";
+import PlayerBar from "../components/PlayerBar.astro";
+import LyricsPanel from "../components/LyricsPanel.astro";
+import QueueDrawer from "../components/QueueDrawer.astro";
+import Theater from "../components/Theater.astro";
+import MiniPlayer from "../components/MiniPlayer.astro";
+import CardTemplates from "../components/CardTemplates.astro";
+import HomeSkeleton from "../components/HomeSkeleton.astro";
+---
+
+<Layout>
+  <div class="app">
+    <Sidebar />
+
+    <div class="main">
+      <Topbar />
+      <div class="workspace">
+        <div class="view-scroll" id="view-scroll">
+          <main class="view" id="view" tabindex="-1">
+            <HomeSkeleton />
+          </main>
+        </div>
+        <LyricsPanel />
+      </div>
+      <PlayerBar />
+    </div>
+  </div>
+
+  <QueueDrawer />
+  <Theater />
+  <MiniPlayer />
+  <CardTemplates />
+  <div class="ctx-menu" id="ctx-menu" role="menu" aria-label="Track actions"></div>
+</Layout>
+
+<script>
+  import "../scripts/app";
+</script>

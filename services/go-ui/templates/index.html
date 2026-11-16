@@ -1,0 +1,1541 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="#b48bff">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0910">
+<title>Lirify Indexer — control room</title>
+<link rel="canonical" href="https://lirify.joscart.win/indexer/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23d9c2ff'/%3E%3Cstop offset='.55' stop-color='%23b48bff'/%3E%3Cstop offset='1' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='%230b0910'/%3E%3Cpath d='M11 23V9.5l12-2.5v13' fill='none' stroke='url(%23g)' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='8.2' cy='23.2' r='3' fill='url(%23g)'/%3E%3Ccircle cx='20.2' cy='20.2' r='3' fill='url(%23g)'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300..700&family=Outfit:wght@300..800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* ------------------------------------------------------------------ tokens */
+:root{
+  color-scheme:dark;
+  --hue:292;
+  --bg-0:oklch(.145 .016 var(--hue));
+  --bg-1:oklch(.185 .018 var(--hue));
+  --bg-2:oklch(.225 .02 var(--hue));
+  --surface-1:oklch(.205 .018 var(--hue));
+  --surface-2:oklch(.245 .02 var(--hue));
+  --surface-3:oklch(.295 .024 var(--hue));
+  --text-1:oklch(.972 .008 var(--hue));
+  --text-2:oklch(.795 .022 var(--hue));
+  --text-3:oklch(.655 .026 var(--hue));
+  --text-4:oklch(.52 .028 var(--hue));
+  --line:oklch(1 0 0 / 8%);
+  --line-strong:oklch(1 0 0 / 14%);
+  --accent:#b48bff;
+  --accent-strong:#c9abff;
+  --accent-deep:#8b5cf6;
+  --accent-2:#f0a8ff;
+  --accent-contrast:#120a20;
+  --good:#45e6a4;
+  --warn:#ffc857;
+  --bad:#ff6b81;
+  --radius-sm:9px;
+  --radius:12px;
+  --radius-lg:18px;
+  --radius-xl:26px;
+  --shadow-sm:0 1px 2px rgb(0 0 0 / 35%);
+  --shadow-md:0 8px 24px -12px rgb(0 0 0 / 55%);
+  --shadow-lg:0 26px 60px -20px rgb(0 0 0 / 70%);
+  --shadow-accent:0 14px 42px -14px color-mix(in oklab,var(--accent) 55%,transparent);
+  --font-ui:"DM Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-display:"Outfit","DM Sans",ui-sans-serif,system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sidebar-w:252px;
+  --topbar-h:68px;
+  --page-x:clamp(18px,3vw,40px);
+  --ease-out:cubic-bezier(.22,.61,.36,1);
+  --ease-spring:cubic-bezier(.34,1.56,.64,1);
+  --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E");
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;font-family:var(--font-ui);font-size:15px;line-height:1.5;color:var(--text-1);
+  background:
+    radial-gradient(1100px 700px at 10% -10%,color-mix(in oklab,var(--accent) 15%,transparent),transparent 62%),
+    radial-gradient(900px 620px at 88% 0%,color-mix(in oklab,var(--accent-2) 9%,transparent),transparent 58%),
+    var(--bg-0);
+  overflow:hidden;
+}
+body::before{content:"";position:fixed;inset:0;background-image:var(--grain);opacity:.05;pointer-events:none;z-index:90;mix-blend-mode:overlay}
+h1,h2,h3,h4{font-family:var(--font-display);font-weight:650;letter-spacing:-.025em;line-height:1.12;margin:0}
+p{margin:0}a{color:inherit;text-decoration:none}button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+svg{display:block}ul,ol{margin:0;padding:0;list-style:none}
+::selection{background:color-mix(in oklab,var(--accent) 42%,transparent);color:#fff}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:5px}
+*{scrollbar-width:thin;scrollbar-color:color-mix(in oklab,var(--text-1) 20%,transparent) transparent}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:color-mix(in oklab,var(--text-1) 16%,transparent);border:3px solid transparent;background-clip:content-box;border-radius:999px}
+*::-webkit-scrollbar-thumb:hover{background:color-mix(in oklab,var(--text-1) 30%,transparent);background-clip:content-box}
+.icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+[hidden]{display:none!important}
+.spacer{flex:1}
+.muted{color:var(--text-3)}
+.mono{font-family:var(--font-mono);font-size:11px}
+.eyebrow{font-size:10px;font-weight:650;letter-spacing:.16em;text-transform:uppercase;color:var(--text-3)}
+.eyebrow.accent{color:var(--accent-strong)}
+/* ------------------------------------------------------------------ frame */
+.app{display:flex;height:100dvh;overflow:hidden}
+.sidebar{
+  position:relative;z-index:40;width:var(--sidebar-w);flex:0 0 var(--sidebar-w);
+  display:flex;flex-direction:column;gap:10px;padding:20px 14px 16px;
+  background:linear-gradient(180deg,color-mix(in oklab,var(--bg-2) 72%,transparent),var(--bg-0) 62%),var(--bg-0);
+  border-right:1px solid var(--line);
+}
+.sidebar::after{content:"";position:absolute;inset:0 0 auto;height:250px;background:radial-gradient(70% 100% at 20% 0%,color-mix(in oklab,var(--accent) 14%,transparent),transparent 70%);pointer-events:none}
+.brand{position:relative;display:flex;align-items:center;gap:11px;padding:2px 8px 15px}
+.brand-mark{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;color:var(--accent-contrast);background:linear-gradient(150deg,var(--accent-strong),var(--accent) 55%,var(--accent-deep));box-shadow:var(--shadow-accent)}
+.brand-mark svg{width:23px;height:23px}
+.brand-name{display:block;font-family:var(--font-display);font-size:21px;font-weight:720;letter-spacing:-.045em;line-height:1.05}
+.brand-name span{color:var(--accent)}
+.brand-tag{display:block;margin-top:2px;font-size:8.5px;font-weight:650;letter-spacing:.2em;text-transform:uppercase;color:var(--text-4)}
+.nav{display:flex;flex-direction:column;gap:3px;position:relative}
+.nav-item{position:relative;display:flex;align-items:center;gap:11px;height:42px;padding:0 11px;border-radius:var(--radius-sm);color:var(--text-2);font-size:13.5px;font-weight:550;transition:background .18s var(--ease-out),color .18s var(--ease-out)}
+.nav-item .icon{width:18px;height:18px;opacity:.85}
+.nav-item .nav-hint{margin-left:auto;font-family:var(--font-mono);font-size:9px;color:var(--text-4);opacity:.55}
+.nav-item:hover{background:color-mix(in oklab,var(--text-1) 6%,transparent);color:var(--text-1)}
+.nav-item.is-active{color:var(--text-1);background:color-mix(in oklab,var(--accent) 14%,transparent)}
+.nav-item.is-active::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:999px;background:linear-gradient(var(--accent-strong),var(--accent-deep))}
+.nav-item.is-active .icon{color:var(--accent-strong);opacity:1}
+.side-card{position:relative;margin-top:auto;padding:14px;border-radius:var(--radius-lg);border:1px solid var(--line);background:radial-gradient(130% 130% at 0% 0%,color-mix(in oklab,var(--accent) 18%,transparent),transparent 66%),var(--surface-1)}
+.side-card-head{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--text-2);font-weight:550}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--text-4);flex:0 0 auto;box-shadow:0 0 0 0 transparent;transition:background .2s,box-shadow .2s}
+.dot.is-live{background:var(--good);box-shadow:0 0 10px color-mix(in oklab,var(--good) 65%,transparent)}
+.dot.is-off{background:var(--bad)}
+.side-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0 12px}
+.side-stats b{display:block;font-family:var(--font-display);font-size:21px;font-weight:700;letter-spacing:-.04em}
+.side-stats span{font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-4)}
+.side-card .btn{width:100%}
+.side-foot{margin-top:10px;padding:0 6px;font-size:9.5px;line-height:1.6;color:var(--text-4)}
+.side-foot b{display:block;color:var(--text-3);font-weight:550;font-size:10px}
+.main{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+/* ------------------------------------------------------------------ topbar */
+.topbar{position:relative;z-index:30;height:var(--topbar-h);flex:0 0 var(--topbar-h);display:flex;align-items:center;gap:10px;padding:0 var(--page-x);background:linear-gradient(180deg,color-mix(in oklab,var(--bg-1) 92%,transparent),color-mix(in oklab,var(--bg-1) 55%,transparent));backdrop-filter:blur(22px) saturate(1.2);border-bottom:1px solid transparent;transition:border-color .25s}
+.topbar.is-stuck{border-bottom-color:var(--line)}
+.crumb{display:flex;align-items:center;gap:9px;min-width:0}
+.crumb-kicker{font-family:var(--font-display);font-size:14px;font-weight:650;letter-spacing:-.02em;color:var(--text-2)}
+.crumb-sep{color:var(--text-4);font-size:11px}
+.crumb-page{font-size:12.5px;font-weight:600;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ws-chip,.api-chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:color-mix(in oklab,var(--bg-0) 45%,transparent);font-size:10px;font-weight:600;letter-spacing:.04em;color:var(--text-3);white-space:nowrap}
+.ws-chip.is-live{border-color:color-mix(in oklab,var(--good) 32%,transparent);background:color-mix(in oklab,var(--good) 10%,transparent);color:var(--good)}
+.ws-chip.is-off{border-color:color-mix(in oklab,var(--bad) 30%,transparent);background:color-mix(in oklab,var(--bad) 9%,transparent);color:var(--bad)}
+.api-chip.is-off{color:var(--bad);border-color:color-mix(in oklab,var(--bad) 25%,transparent)}
+.topbar .avatar{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--accent-contrast);background:linear-gradient(145deg,var(--accent-strong),var(--accent-deep));border:2px solid color-mix(in oklab,var(--text-1) 16%,transparent);box-shadow:var(--shadow-md)}
+.mobile-only{display:none!important}
+/* ------------------------------------------------------------------ view */
+.scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scroll-behavior:smooth}
+.view{width:100%;max-width:1540px;margin:0 auto;padding:24px var(--page-x) 80px;animation:fade .35s var(--ease-out)}
+section[id]{scroll-margin-top:20px}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:.55;transform:scale(.96)}50%{opacity:1;transform:scale(1.04)}}
+@keyframes shimmer{0%{background-position:-220% 0}100%{background-position:220% 0}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}
+/* ------------------------------------------------------------------ controls */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 18px;border-radius:999px;font-size:12.5px;font-weight:650;letter-spacing:.01em;white-space:nowrap;transition:transform .16s var(--ease-spring),background .16s,color .16s,border-color .16s}
+.btn .icon{width:16px;height:16px}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:translateY(0) scale(.985)}
+.btn:disabled{opacity:.45;pointer-events:none}
+.btn.is-busy .icon{animation:spin 1s linear infinite}
+.btn-primary{color:var(--accent-contrast);background:linear-gradient(150deg,#fff,color-mix(in oklab,var(--accent-strong) 78%,#fff));box-shadow:0 10px 28px -12px color-mix(in oklab,var(--accent) 75%,transparent)}
+.btn-accent{color:var(--accent-contrast);background:linear-gradient(145deg,var(--accent-strong),var(--accent));box-shadow:var(--shadow-accent)}
+.btn-ghost{color:var(--text-1);background:color-mix(in oklab,var(--text-1) 7%,transparent);border:1px solid var(--line)}
+.btn-ghost:hover{background:color-mix(in oklab,var(--text-1) 12%,transparent);border-color:var(--line-strong)}
+.btn-outline{color:var(--text-2);border:1px solid var(--line-strong)}
+.btn-outline:hover{color:var(--text-1);border-color:color-mix(in oklab,var(--accent) 45%,transparent)}
+.btn-sm{height:32px;padding:0 13px;font-size:11.5px}
+.btn-xs{height:26px;padding:0 9px;font-size:10.5px}
+.icon-btn{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:8px;color:var(--text-3);transition:color .16s,background .16s,transform .16s}
+.icon-btn .icon{width:18px;height:18px}
+.icon-btn:hover{color:var(--text-1);background:color-mix(in oklab,var(--text-1) 8%,transparent)}
+.icon-btn:active{transform:scale(.94)}
+.icon-btn.tiny{width:26px;height:26px;border-radius:6px}
+.icon-btn.tiny .icon{width:14px;height:14px}
+.icon-btn.round{border-radius:50%;border:1px solid var(--line);background:color-mix(in oklab,var(--bg-0) 45%,transparent)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:color-mix(in oklab,var(--text-1) 4%,transparent);color:var(--text-2);font-size:10.5px;font-weight:550;white-space:nowrap}
+.chip.accent{color:var(--accent-strong);border-color:color-mix(in oklab,var(--accent) 28%,transparent);background:color-mix(in oklab,var(--accent) 10%,transparent)}
+.chip.good{color:var(--good);border-color:color-mix(in oklab,var(--good) 28%,transparent);background:color-mix(in oklab,var(--good) 8%,transparent)}
+.chip .dot{width:5px;height:5px}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>span{font-size:10px;font-weight:650;letter-spacing:.13em;text-transform:uppercase;color:var(--text-4)}
+.input,.textarea,.select{width:100%;border:1px solid var(--line);border-radius:10px;background:color-mix(in oklab,var(--bg-0) 62%,transparent);color:var(--text-1);font-size:12.5px;padding:0 12px;height:42px;outline:none;transition:border-color .18s,box-shadow .18s,background .18s}
+.textarea{height:auto;min-height:104px;padding:11px 12px;resize:vertical;line-height:1.55}
+.input::placeholder,.textarea::placeholder{color:var(--text-4)}
+.input:focus,.textarea:focus,.select:focus{border-color:color-mix(in oklab,var(--accent) 55%,transparent);box-shadow:0 0 0 4px color-mix(in oklab,var(--accent) 11%,transparent);background:color-mix(in oklab,var(--bg-0) 80%,transparent)}
+.input-shell{position:relative;display:flex;align-items:center}
+.input-shell .icon{position:absolute;left:12px;width:16px;height:16px;color:var(--text-4);pointer-events:none}
+.input-shell .input{padding-left:36px}
+.hint-inline{font-size:11px;color:var(--text-4);min-height:16px}
+/* ------------------------------------------------------------------ hero */
+.hero{position:relative;isolation:isolate;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:clamp(20px,4vw,54px);align-items:center;min-height:312px;padding:clamp(24px,3vw,38px);border-radius:var(--radius-xl);border:1px solid color-mix(in oklab,var(--accent) 22%,var(--line));background:radial-gradient(120% 160% at 0% 0%,color-mix(in oklab,var(--accent) 30%,transparent),transparent 58%),radial-gradient(100% 140% at 100% 10%,color-mix(in oklab,var(--accent-2) 18%,transparent),transparent 55%),linear-gradient(145deg,var(--surface-2),var(--bg-1) 68%);box-shadow:var(--shadow-lg);animation:rise .5s var(--ease-out) both}
+.hero::before{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,transparent 40%,rgb(5 4 9 / 50%))}
+.hero::after{content:"";position:absolute;inset:auto -10% -55% 32%;height:320px;z-index:-1;background:radial-gradient(closest-side,color-mix(in oklab,var(--accent) 28%,transparent),transparent);filter:blur(24px);opacity:.85}
+.hero-copy{min-width:0;display:flex;flex-direction:column;gap:14px}
+.hero-kicker{display:flex;align-items:center;gap:8px;font-size:10.5px;font-weight:650;letter-spacing:.16em;text-transform:uppercase;color:color-mix(in oklab,var(--text-1) 78%,transparent)}
+.hero-kicker .dot{background:var(--accent-strong);box-shadow:0 0 12px var(--accent)}
+.hero h1{font-size:clamp(40px,5.1vw,68px);font-weight:720;letter-spacing:-.06em;line-height:.97;text-wrap:balance;text-shadow:0 10px 40px rgb(0 0 0 / 35%)}
+.hero h1 em{font-style:normal;color:var(--accent-strong)}
+.hero-copy>p{max-width:560px;font-size:13.5px;color:var(--text-2)}
+.hero-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:4px}
+.hero-actions .btn{height:42px;padding:0 19px}
+.hero-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font-size:11px;color:var(--text-3);margin-top:2px}
+.hero-aside{display:flex;flex-direction:column;align-items:center;gap:16px;min-width:0}
+.orbit{position:relative;display:grid;place-items:center;width:min(220px,30vh);aspect-ratio:1;flex:0 0 auto}
+.orbit-ring{position:absolute;inset:0;border-radius:50%;border:1px dashed color-mix(in oklab,var(--accent) 45%,transparent);animation:spin 38s linear infinite}
+.orbit-ring::before,.orbit-ring::after{content:"";position:absolute;width:6px;height:6px;border-radius:50%;background:var(--accent-strong);box-shadow:0 0 12px var(--accent);top:50%;margin-top:-3px}
+.orbit-ring::before{left:-3px}
+.orbit-ring::after{right:-3px}
+.orbit-ring.inner{inset:19px;border-style:solid;border-color:color-mix(in oklab,var(--accent) 18%,transparent);animation-duration:26s;animation-direction:reverse}
+.orbit-ring.inner::before,.orbit-ring.inner::after{width:4px;height:4px;margin-top:-2px;background:var(--accent-2)}
+.orbit-core{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:72%;aspect-ratio:1;border-radius:50%;border:1px solid color-mix(in oklab,var(--accent) 30%,transparent);background:radial-gradient(closest-side,color-mix(in oklab,var(--accent) 20%,transparent),color-mix(in oklab,var(--bg-1) 94%,transparent) 74%);box-shadow:inset 0 0 30px color-mix(in oklab,var(--accent) 10%,transparent),var(--shadow-lg)}
+.orbit-core .live-chip{display:inline-flex;align-items:center;gap:5px;font-size:8px;font-weight:700;letter-spacing:.15em;color:var(--good);text-transform:uppercase}
+.orbit-core .live-chip i{width:5px;height:5px;border-radius:50%;background:var(--good);box-shadow:0 0 9px var(--good);animation:pulse 2.4s infinite}
+.orbit-core b{font-family:var(--font-display);font-size:clamp(34px,4.6vw,48px);font-weight:730;letter-spacing:-.06em;line-height:1}
+.orbit-core>span:last-child{font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-4);text-align:center}
+.hero-mini{display:flex;gap:20px;padding-top:14px;border-top:1px solid color-mix(in oklab,var(--text-1) 10%,transparent);width:min(340px,100%)}
+.hero-mini>div{flex:1;text-align:center}
+.hero-mini b{display:block;font-family:var(--font-display);font-size:15px;font-weight:700;letter-spacing:-.03em}
+.hero-mini span{font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in oklab,var(--text-1) 56%,transparent)}
+/* ------------------------------------------------------------------ stats */
+.stats-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0 20px}
+.stat-tile{position:relative;overflow:hidden;padding:13px 15px;border-radius:var(--radius);border:1px solid var(--line);background:color-mix(in oklab,var(--text-1) 4%,transparent)}
+.stat-tile::after{content:"";position:absolute;inset:auto -20% -80% 30%;height:120px;background:radial-gradient(closest-side,color-mix(in oklab,var(--accent) 12%,transparent),transparent);pointer-events:none}
+.stat-tile b{display:block;font-family:var(--font-display);font-size:24px;font-weight:700;letter-spacing:-.045em;line-height:1.05}
+.stat-tile span{display:block;margin-top:3px;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-4)}
+.stat-tile .icon{position:absolute;right:12px;top:12px;width:15px;height:15px;color:color-mix(in oklab,var(--accent) 55%,transparent)}
+/* ------------------------------------------------------------------ panels */
+.layout-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.78fr);gap:18px;align-items:start}
+.rail{display:flex;flex-direction:column;gap:18px;min-width:0}
+.panel{position:relative;min-width:0;padding:20px;border-radius:var(--radius-lg);border:1px solid var(--line);background:linear-gradient(180deg,color-mix(in oklab,var(--surface-1) 88%,transparent),color-mix(in oklab,var(--surface-1) 65%,transparent));box-shadow:var(--shadow-md)}
+.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px}
+.panel-head h2{font-size:20px;font-weight:670;letter-spacing:-.035em}
+.panel-head .eyebrow{display:block;margin-bottom:4px}
+.panel-head .sub{margin-top:3px;font-size:11.5px;color:var(--text-4)}
+.panel-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.panel+.panel{margin-top:18px}
+.view>section.panel{margin-top:18px}
+/* ------------------------------------------------------------------ ingest */
+.ingest-form{display:flex;flex-direction:column;gap:13px}
+.field-grid{display:grid;grid-template-columns:minmax(0,1fr) 118px;gap:10px;align-items:end}
+.form-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.form-row .hint-inline{flex:1;min-width:140px}
+.progress-card{margin-top:14px;padding:13px 14px;border-radius:var(--radius);border:1px solid var(--line);background:color-mix(in oklab,var(--bg-0) 45%,transparent)}
+.progress-head{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--text-2)}
+.progress-head .stage{display:flex;align-items:center;gap:7px;min-width:0}
+.progress-head .stage>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.progress-head b{font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text-1)}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--text-4);flex:0 0 auto}
+.progress-card.is-running .live-dot{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.4s infinite}
+.progress-card.is-error .live-dot{background:var(--bad)}
+.progress-wrap{height:7px;margin:9px 0 8px;border-radius:999px;background:color-mix(in oklab,var(--text-1) 9%,transparent);overflow:hidden}
+#bar{height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,var(--accent-deep),var(--accent),var(--accent-2));box-shadow:0 0 14px color-mix(in oklab,var(--accent) 45%,transparent);transition:width .25s var(--ease-out)}
+.progress-card.is-error #bar{background:linear-gradient(90deg,#7d2437,var(--bad))}
+.progress-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:10.5px;color:var(--text-4)}
+.progress-meta span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.extract-out{margin-top:12px;padding:12px;border-radius:var(--radius);border:1px solid color-mix(in oklab,var(--accent) 20%,var(--line));background:color-mix(in oklab,var(--accent) 6%,transparent)}
+.extract-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;font-size:11px;color:var(--text-2)}
+.extract-head b{color:var(--text-1)}
+.id-chips{display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow:auto}
+.id-chip{font-family:var(--font-mono);font-size:9.5px;padding:2px 6px;border-radius:5px;background:color-mix(in oklab,var(--text-1) 6%,transparent);color:var(--text-3)}
+/* ------------------------------------------------------------------ events */
+.subhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 8px}
+.subhead h3{font-size:12px;font-weight:650;letter-spacing:-.01em;color:var(--text-2)}
+.subhead .actions{display:flex;align-items:center;gap:6px}
+.count-pill{font-family:var(--font-mono);font-size:9px;color:var(--text-4);padding:2px 7px;border-radius:999px;border:1px solid var(--line)}
+.event-log{height:328px;overflow-y:auto;border-radius:var(--radius);border:1px solid var(--line);background:color-mix(in oklab,var(--bg-0) 58%,transparent);padding:4px}
+.event-log:empty::before{content:"Live scraping, queue, retry and commit events will appear here.";display:block;padding:20px;text-align:center;font-size:11.5px;color:var(--text-4)}
+.event{display:grid;grid-template-columns:54px 82px minmax(0,1fr);gap:9px;align-items:start;padding:6px 8px;border-radius:7px;font-size:11px;color:var(--text-2);border-left:2px solid transparent}
+.event:hover{background:color-mix(in oklab,var(--text-1) 4%,transparent)}
+.event time{font-family:var(--font-mono);font-size:9px;color:var(--text-4);padding-top:2px}
+.event-type{font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-4);padding-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.event-text{min-width:0;overflow-wrap:anywhere;line-height:1.45}
+.event-text small{display:block;margin-top:1px;color:var(--text-4);font-size:10px}
+.ev-success{border-left-color:var(--good)}
+.ev-success .event-type{color:var(--good)}
+.ev-error{border-left-color:var(--bad)}
+.ev-error .event-type{color:var(--bad)}
+.ev-warn{border-left-color:var(--warn)}
+.ev-warn .event-type{color:var(--warn)}
+.ev-active{border-left-color:var(--accent)}
+.ev-active .event-type{color:var(--accent-strong)}
+.ev-job{border-left-color:color-mix(in oklab,var(--accent-2) 55%,transparent)}
+.ev-job .event-type{color:var(--accent-2)}
+/* ------------------------------------------------------------------ pipeline */
+.pipeline{display:flex;flex-direction:column;gap:4px}
+.pipeline-row{display:flex;align-items:center;gap:10px;height:38px;padding:0 9px;border-radius:8px;color:var(--text-2);font-size:11.5px}
+.pipeline-row:hover{background:color-mix(in oklab,var(--text-1) 4%,transparent)}
+.pipeline-row .icon{width:15px;height:15px;color:var(--text-4)}
+.pipeline-row b{margin-left:auto;font-family:var(--font-display);font-size:15px;font-weight:700;letter-spacing:-.02em;color:var(--text-1)}
+.pipeline-row small{margin-left:auto;font-size:9px;color:var(--text-4)}
+.pipeline-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:10px;color:var(--text-4)}
+.cache-mini{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.cache-mini>div{padding:10px;border-radius:9px;border:1px solid var(--line);background:color-mix(in oklab,var(--bg-0) 35%,transparent)}
+.cache-mini b{display:block;font-family:var(--font-display);font-size:20px;font-weight:700;letter-spacing:-.03em}
+.cache-mini span{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-4)}
+/* ------------------------------------------------------------------ metrics */
+.stats-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:18px}
+.metric-card{display:inline-block;width:100%;break-inside:avoid;margin:0 0 12px;padding:13px;border-radius:var(--radius);border:1px solid var(--line);background:color-mix(in oklab,var(--bg-0) 34%,transparent)}
+.metric-card h3{font-size:11px;font-weight:650;color:var(--text-2);margin-bottom:10px;letter-spacing:0}
+.bars{display:flex;flex-direction:column;gap:7px}
+.bar-row{display:grid;grid-template-columns:76px 54px minmax(0,1fr);gap:8px;align-items:center;font-size:10.5px;color:var(--text-3)}
+.bar-row>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase;letter-spacing:.06em;font-size:9.5px}
+.bar-row .bar-count{text-align:right;font-family:var(--font-mono);font-size:9.5px;color:var(--text-4)}
+.bar{height:5px;border-radius:999px;background:color-mix(in oklab,var(--text-1) 8%,transparent);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent-deep),var(--accent-strong))}
+.metric-grid{columns:2;column-gap:12px;margin-top:12px}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chips .chip{height:22px;padding:0 8px;font-size:9.5px}
+.provider-chain{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.provider{padding:4px 9px 4px 5px;border-radius:999px;border:1px solid var(--line);background:color-mix(in oklab,var(--text-1) 4%,transparent);font-size:10px;color:var(--text-2);display:inline-flex;align-items:center;gap:6px}
+.provider i{display:grid;place-items:center;width:14px;height:14px;border-radius:50%;background:color-mix(in oklab,var(--accent) 16%,transparent);color:var(--accent-strong);font-family:var(--font-mono);font-size:7px;font-style:normal}
+.provider-arrow{color:var(--text-4);font-size:10px}
+/* ------------------------------------------------------------------ tables */
+.table-scroll{overflow:auto;border-radius:var(--radius);border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{position:sticky;top:0;z-index:2;background:color-mix(in oklab,var(--surface-2) 94%,transparent);font-size:9px;font-weight:650;letter-spacing:.12em;text-transform:uppercase;color:var(--text-4)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in oklab,var(--text-1) 3%,transparent)}
+td.url-cell{max-width:320px;overflow:hidden;text-overflow:ellipsis;color:var(--text-2)}
+td.reason-cell{max-width:220px;overflow:hidden;text-overflow:ellipsis;color:var(--text-4);font-size:10.5px}
+.status{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:999px;font-size:9px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap}
+.status::before{content:"";width:4px;height:4px;border-radius:50%;background:currentColor}
+.status.good{color:var(--good);background:color-mix(in oklab,var(--good) 10%,transparent)}
+.status.bad{color:var(--bad);background:color-mix(in oklab,var(--bad) 10%,transparent)}
+.status.active{color:var(--accent-strong);background:color-mix(in oklab,var(--accent) 12%,transparent)}
+.status.queued{color:var(--warn);background:color-mix(in oklab,var(--warn) 10%,transparent)}
+.status.muted{color:var(--text-4);background:color-mix(in oklab,var(--text-1) 6%,transparent)}
+.empty-table{padding:26px 14px;text-align:center;font-size:11.5px;color:var(--text-4)}
+/* ------------------------------------------------------------------ matrices */
+.matrix-tabs{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+.matrix-tab{height:28px;padding:0 11px;border-radius:999px;border:1px solid var(--line);background:color-mix(in oklab,var(--text-1) 4%,transparent);color:var(--text-3);font-size:10.5px;font-weight:600;transition:background .16s,color .16s,border-color .16s}
+.matrix-tab:hover{color:var(--text-1);background:color-mix(in oklab,var(--text-1) 8%,transparent)}
+.matrix-tab.is-active{color:var(--accent-contrast);background:linear-gradient(145deg,var(--accent-strong),var(--accent));border-color:transparent}
+.matrix-meta{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;font-size:10px;color:var(--text-4)}
+.matrix-wrap{display:flex;justify-content:flex-start;overflow:auto;border-radius:var(--radius);border:1px solid var(--line);background:color-mix(in oklab,var(--bg-0) 45%,transparent);padding:10px}
+.matrix-wrap .empty-table{width:100%}
+@media (min-width:1200px){.matrix-wrap{justify-content:center}}
+.matrix-table{border-collapse:separate;border-spacing:0;font-size:9px;width:auto;table-layout:fixed}
+.matrix-table th,.matrix-table td{padding:0;border:0;text-align:center}
+.matrix-table thead th{position:sticky;top:0;z-index:2;background:var(--surface-1);height:24px;font-size:8px;color:var(--text-4);width:36px}
+.matrix-table thead th:first-child{left:0;z-index:3;width:220px;min-width:220px;text-align:left;padding-left:10px}
+.matrix-table tbody th{position:sticky;left:0;z-index:1;background:var(--surface-1);height:34px;width:220px;min-width:220px;max-width:220px;padding:0 10px;text-align:left;font-size:9.5px;font-weight:500;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.matrix-table tbody th span{display:block;font-size:8px;color:var(--text-4);font-weight:400}
+.matrix-cell{width:36px;height:34px;font-family:var(--font-mono);font-size:8px;color:var(--text-3)}
+.matrix-legend{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:9px;color:var(--text-4)}
+.legend-gradient{flex:1;max-width:220px;height:6px;border-radius:999px;background:linear-gradient(90deg,rgba(180,139,255,.08),rgba(180,139,255,.85))}
+/* ------------------------------------------------------------------ diagnostics */
+.cache-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-bottom:14px}
+.cache-cards .stat-tile b{font-size:20px}
+.failed-list{max-height:300px;overflow:auto;border-radius:var(--radius);border:1px solid var(--line)}
+.failed-item{display:grid;grid-template-columns:96px minmax(0,1fr) 60px;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);font-size:11px}
+.failed-item:last-child{border-bottom:0}
+.failed-item:hover{background:color-mix(in oklab,var(--text-1) 3%,transparent)}
+.failed-item .vid{font-family:var(--font-mono);font-size:9.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis}
+.failed-item .meta{min-width:0}
+.failed-item .meta b{display:block;font-size:11px;font-weight:550;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.failed-item .meta span{display:block;font-size:9.5px;color:var(--text-4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.failed-item .attempts{text-align:right;font-family:var(--font-mono);font-size:9px;color:var(--text-4)}
+.diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.diag-card{padding:12px;border-radius:var(--radius);border:1px solid var(--line);background:color-mix(in oklab,var(--bg-0) 34%,transparent)}
+.diag-card h3{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--text-4);margin-bottom:8px}
+/* ------------------------------------------------------------------ toast */
+.toasts{position:fixed;left:50%;bottom:24px;z-index:120;display:flex;flex-direction:column;align-items:center;gap:8px;transform:translateX(-50%);pointer-events:none}
+.toast{display:flex;align-items:center;gap:9px;max-width:min(460px,calc(100vw - 28px));padding:9px 14px;border-radius:999px;border:1px solid var(--line-strong);background:rgb(14 11 21 / 94%);backdrop-filter:blur(20px);box-shadow:var(--shadow-lg);font-size:11.5px;color:var(--text-1);pointer-events:auto;animation:rise .24s var(--ease-out)}
+.toast .icon{width:15px;height:15px;color:var(--accent-strong)}
+.toast.is-error .icon{color:var(--bad)}
+.toast.is-leaving{animation:fade .2s reverse both}
+/* ------------------------------------------------------------------ responsive */
+@media (max-width:1180px){
+  :root{--sidebar-w:226px;--page-x:26px}
+  .layout-grid{grid-template-columns:1fr}
+  .rail{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .hero{grid-template-columns:minmax(0,1.25fr) minmax(240px,.6fr)}
+  .stats-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (max-width:980px){
+  .sidebar{position:fixed;inset:0 auto 0 0;width:280px;transform:translateX(-104%);transition:transform .28s var(--ease-out);box-shadow:var(--shadow-lg)}
+  body[data-menu="open"] .sidebar{transform:translateX(0)}
+  .mobile-only{display:inline-grid!important}
+  .sidebar{overflow-y:auto}
+  .crumb-kicker,.crumb-sep{display:none}
+  .hero{grid-template-columns:1fr}
+  .hero-aside{flex-direction:row;justify-content:space-between;align-items:center}
+  .orbit{width:150px;margin-left:auto}
+  .hero-mini{width:auto;flex:1;border-top:0;padding-top:0}
+  .hero-mini>div{text-align:left}
+  .rail{grid-template-columns:1fr 1fr}
+  .topbar{gap:6px}
+  .api-chip{display:none}
+  .stats-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cache-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .diag-grid{grid-template-columns:1fr}
+}
+@media (max-width:720px){
+  :root{--page-x:16px;--topbar-h:60px}
+  .view{padding-top:16px}
+  .topbar .ws-chip{padding:0 8px}
+  .topbar .ws-chip span:last-child{display:none}
+  .topbar .icon-btn{width:32px;height:32px}
+  .hero{padding:20px;border-radius:var(--radius-lg)}
+  .hero h1{font-size:clamp(34px,10vw,48px)}
+  .hero-aside{flex-direction:column;align-items:stretch}
+  .orbit{width:170px;margin:0 auto}
+  .hero-mini{border-top:1px solid color-mix(in oklab,var(--text-1) 10%,transparent);padding-top:12px}
+  .stats-strip,.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .layout-grid{display:block}
+  .rail{display:flex;margin-top:18px}
+  .panel{padding:16px}
+  .panel-head h2{font-size:18px}
+  .field-grid{grid-template-columns:1fr}
+  .event{grid-template-columns:44px 68px minmax(0,1fr);gap:7px;font-size:10.5px}
+  .cache-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .metric-grid{columns:1}
+  .bar-row{grid-template-columns:56px 48px minmax(0,1fr)}
+  .failed-item{grid-template-columns:78px minmax(0,1fr) 46px}
+  .topbar .avatar{width:30px;height:30px}
+  .toasts{bottom:16px}
+}
+.sidebar-close{display:none;position:absolute;right:12px;top:18px;z-index:2}
+.scrim{position:fixed;inset:0;z-index:39;background:rgb(0 0 0 / 55%);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .25s}
+body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
+</style>
+</head>
+<body data-menu="closed">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-overview" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/></symbol>
+  <symbol id="i-ingest" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 6h13"/><path d="M4 12h13"/><path d="M4 18h8"/><path d="M19 12v7"/><circle cx="17" cy="20" r="2"/></symbol>
+  <symbol id="i-metrics" viewBox="0 0 24 24"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></symbol>
+  <symbol id="i-matrix" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></symbol>
+  <symbol id="i-diagnostics" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4.5V10H15"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8.5 8.5"/><path d="M18 14v5a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V7.5A1.5 1.5 0 0 1 5 6h5"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.15v13.7a1 1 0 0 0 1.53.85l10.6-6.85a1 1 0 0 0 0-1.7L9.53 4.3A1 1 0 0 0 8 5.15Z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7L11.4 6.9"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.4-1.4"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5.5l11-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 12h2M8 7v10M12 4v16M16 8v8M20 10v4"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3 1.7 4.8L18.5 9.5l-4.8 1.7L12 16l-1.7-4.8L5.5 9.5l4.8-1.7zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/><path d="M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5L20 6.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4z"/><path d="M12 9v5M12 17.5v.1"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.2 2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l.8 13h9.4l.8-13M10 11v5.5M14 11v5.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4H5.5A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+</svg>
+
+<div class="app">
+  <aside class="sidebar" id="sidebar" aria-label="Indexer navigation">
+    <a class="brand" href="#overview" aria-label="Lirify indexer overview">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M8 17.5V6.4l9-1.9v11.1" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><circle cx="5.4" cy="17.7" r="2.5" fill="currentColor"/><circle cx="14.4" cy="15.7" r="2.5" fill="currentColor"/></svg>
+      </span>
+      <span>
+        <span class="brand-name">lirify<span>.</span></span>
+        <span class="brand-tag">indexer</span>
+      </span>
+    </a>
+    <button class="icon-btn mobile-only sidebar-close" id="sideClose" aria-label="Close navigation"><svg class="icon"><use href="#i-close"/></svg></button>
+
+    <nav class="nav" id="sideNav" aria-label="Sections">
+      <a class="nav-item is-active" href="#overview" data-nav="overview"><svg class="icon"><use href="#i-overview"/></svg><span>Overview</span><span class="nav-hint">01</span></a>
+      <a class="nav-item" href="#ingest" data-nav="ingest"><svg class="icon"><use href="#i-ingest"/></svg><span>Ingest</span><span class="nav-hint">02</span></a>
+      <a class="nav-item" href="#queue" data-nav="queue"><svg class="icon"><use href="#i-queue"/></svg><span>Queue</span><span class="nav-hint">03</span></a>
+      <a class="nav-item" href="#metrics" data-nav="metrics"><svg class="icon"><use href="#i-metrics"/></svg><span>Metrics</span><span class="nav-hint">04</span></a>
+      <a class="nav-item" href="#matrices" data-nav="matrices"><svg class="icon"><use href="#i-matrix"/></svg><span>Matrices</span><span class="nav-hint">05</span></a>
+      <a class="nav-item" href="#diagnostics" data-nav="diagnostics"><svg class="icon"><use href="#i-diagnostics"/></svg><span>Diagnostics</span><span class="nav-hint">06</span></a>
+    </nav>
+
+    <div class="side-card">
+      <div class="side-card-head"><span class="dot" id="sideDot"></span><span id="wsSide">Connecting to API</span></div>
+      <div class="side-stats">
+        <div><b id="sideSongs">—</b><span>songs</span></div>
+        <div><b id="sideTerms">—</b><span>terms</span></div>
+      </div>
+      <a class="btn btn-primary btn-sm" id="playerLink" href="#" target="_blank" rel="noreferrer">Open player <svg class="icon"><use href="#i-external"/></svg></a>
+    </div>
+
+    <div class="side-foot">
+      <b id="domainLabel">lirify</b>
+      FastAPI · Go · Astro<br>
+      <span id="apiBaseLabel">API</span>
+    </div>
+  </aside>
+  <button class="scrim" id="scrim" aria-label="Close navigation"></button>
+
+  <div class="main">
+    <header class="topbar" id="topbar">
+      <button class="icon-btn mobile-only" id="btnMenu" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg class="icon"><use href="#i-menu"/></svg></button>
+      <div class="crumb"><span class="crumb-kicker">lirify</span><span class="crumb-sep">/</span><span class="crumb-page" id="crumbPage">Overview</span></div>
+      <span class="spacer"></span>
+      <span class="ws-chip" id="wsChip"><span class="dot" id="wsDot"></span><span id="wsChipText">connecting</span></span>
+      <span class="api-chip" id="apiChip"><span class="dot is-live" id="apiDot"></span><span id="apiChipText">api</span></span>
+      <button class="icon-btn" id="refreshAll" aria-label="Refresh dashboard" title="Refresh everything"><svg class="icon"><use href="#i-refresh"/></svg></button>
+      <a class="icon-btn" id="docsLink" href="#" target="_blank" rel="noreferrer" aria-label="API docs" title="API docs"><svg class="icon"><use href="#i-code"/></svg></a>
+      <a class="avatar" id="topPlayerLink" href="#" target="_blank" rel="noreferrer" aria-label="Open player" title="Open player">L</a>
+    </header>
+
+    <div class="scroll" id="scroll">
+      <main class="view">
+        <section class="hero" id="overview">
+          <div class="hero-copy">
+            <div class="hero-kicker"><span class="dot"></span>Indexer control room</div>
+            <h1>Feed the <em>lyric graph</em>.</h1>
+            <p>Scrape playlists, watch the two-stage queue, and inspect the similarity matrices that power Lirify's search and recommendations. Everything is accumulative — playlists add to the live index.</p>
+            <div class="hero-actions">
+              <button class="btn btn-primary" data-scroll="ingest"><svg class="icon"><use href="#i-ingest"/></svg>Index a playlist</button>
+              <button class="btn btn-ghost" data-scroll="queue"><svg class="icon"><use href="#i-queue"/></svg>Open queue</button>
+              <a class="btn btn-outline" id="heroPlayerLink" href="#" target="_blank" rel="noreferrer"><svg class="icon"><use href="#i-play"/></svg>Listen</a>
+            </div>
+            <div class="hero-meta">
+              <span class="chip"><span class="dot is-live"></span><span id="allowedChip">en + es only</span></span>
+              <span id="lastRefresh">Fetching index state…</span>
+            </div>
+          </div>
+          <div class="hero-aside">
+            <div class="orbit" aria-hidden="true">
+              <div class="orbit-ring"></div>
+              <div class="orbit-ring inner"></div>
+              <div class="orbit-core">
+                <span class="live-chip"><i></i>live index</span>
+                <b id="heroSongs">—</b>
+                <span>songs indexed</span>
+              </div>
+            </div>
+            <div class="hero-mini">
+              <div><b id="heroTerms">—</b><span>terms</span></div>
+              <div><b id="heroTokens">—</b><span>tokens</span></div>
+              <div><b id="heroQueue">—</b><span>in queue</span></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="stats-strip">
+          <div class="stat-tile"><svg class="icon"><use href="#i-music"/></svg><b id="tileSongs">—</b><span>Songs indexed</span></div>
+          <div class="stat-tile"><svg class="icon"><use href="#i-database"/></svg><b id="tileTerms">—</b><span>Inverted terms</span></div>
+          <div class="stat-tile"><svg class="icon"><use href="#i-sparkles"/></svg><b id="tileTokens">—</b><span>Lyric tokens</span></div>
+          <div class="stat-tile"><svg class="icon"><use href="#i-queue"/></svg><b id="tileQueue">—</b><span>Pending jobs</span></div>
+        </div>
+
+        <div class="layout-grid">
+          <section class="panel" id="ingest">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Ingest</span>
+                <h2>Extract &amp; index</h2>
+                <div class="sub">A YouTube video or playlist URL. Extraction is read-only; indexing commits eligible lyrics.</div>
+              </div>
+              <div class="panel-actions"><span class="chip" id="ingestBadge">idle</span></div>
+            </div>
+
+            <div class="ingest-form">
+              <div class="field-grid">
+                <label class="field">
+                  <span>Playlist or video URL</span>
+                  <div class="input-shell">
+                    <svg class="icon"><use href="#i-link"/></svg>
+                    <input class="input" id="url" type="url" placeholder="https://youtube.com/playlist?list=… or https://youtu.be/…" autocomplete="off" required>
+                  </div>
+                </label>
+                <label class="field">
+                  <span>Limit</span>
+                  <input class="input" id="limit" type="number" min="1" placeholder="all">
+                </label>
+              </div>
+              <div class="form-row">
+                <button class="btn btn-ghost" id="extractBtn" type="button"><svg class="icon"><use href="#i-queue"/></svg>Extract IDs</button>
+                <button class="btn btn-primary" id="indexBtn" type="button"><svg class="icon"><use href="#i-ingest"/></svg>Index now</button>
+                <span class="hint-inline" id="msg">Commands run over gRPC to the python-backend.</span>
+              </div>
+            </div>
+
+            <div class="progress-card" id="progressCard">
+              <div class="progress-head">
+                <span class="stage"><span class="live-dot"></span><span id="stageLabel">Idle</span></span>
+                <b id="progressPct">0%</b>
+              </div>
+              <div class="progress-wrap" id="progressWrap"><div id="bar"></div></div>
+              <div class="progress-meta"><span id="jobStatus">No indexing job running</span><span id="jobCounter">—</span></div>
+            </div>
+
+            <div class="extract-out" id="extractOut" hidden>
+              <div class="extract-head">
+                <span>Extracted <b id="extractCount">0</b> video IDs</span>
+                <div class="panel-actions">
+                  <button class="btn btn-ghost btn-xs" id="copyIds" type="button"><svg class="icon"><use href="#i-copy"/></svg>Copy</button>
+                  <button class="icon-btn tiny" id="hideIds" type="button" aria-label="Hide extracted IDs"><svg class="icon"><use href="#i-close"/></svg></button>
+                </div>
+              </div>
+              <div class="id-chips" id="extractIds"></div>
+            </div>
+
+            <div class="subhead">
+              <h3>Live events</h3>
+              <div class="actions">
+                <span class="count-pill" id="eventCount">0</span>
+                <button class="btn btn-ghost btn-xs" id="clearEvents" type="button">Clear</button>
+              </div>
+            </div>
+            <div class="event-log" id="stream" role="log" aria-live="polite"></div>
+          </section>
+
+          <aside class="rail">
+            <section class="panel" id="pipelinePanel">
+              <div class="panel-head">
+                <div><span class="eyebrow">Pipeline</span><h2>Queue pressure</h2></div>
+                <div class="panel-actions"><button class="icon-btn tiny" id="refreshQueue" aria-label="Refresh queue" title="Refresh queue"><svg class="icon"><use href="#i-refresh"/></svg></button></div>
+              </div>
+              <div class="pipeline">
+                <div class="pipeline-row"><svg class="icon"><use href="#i-queue"/></svg><span>Playlist queue</span><b id="qPlaylist">0</b></div>
+                <div class="pipeline-row"><svg class="icon"><use href="#i-matrix"/></svg><span>Matrix queue</span><b id="qMatrix">0</b></div>
+                <div class="pipeline-row"><svg class="icon"><use href="#i-database"/></svg><span>Stashed batches</span><b id="qStash">0</b></div>
+                <div class="pipeline-row"><svg class="icon"><use href="#i-music"/></svg><span>Cached lyrics</span><b id="qCache">0</b></div>
+                <div class="pipeline-row"><svg class="icon"><use href="#i-alert"/></svg><span>Failed / retrying</span><b id="qFailed">0</b></div>
+              </div>
+              <div class="pipeline-foot"><span id="queueBadge">Idle</span><span id="lastEvent">No events yet</span></div>
+            </section>
+
+            <section class="panel" id="cachePanel">
+              <div class="panel-head">
+                <div><span class="eyebrow">Cache</span><h2>Retry health</h2></div>
+              </div>
+              <div class="cache-mini">
+                <div><b id="cacheCachedMini">0</b><span>lyrics cached</span></div>
+                <div><b id="cacheFailedMini">0</b><span>failed songs</span></div>
+              </div>
+              <button class="btn btn-ghost btn-sm" id="retryMini" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Retry failed songs</button>
+            </section>
+          </aside>
+        </div>
+
+        <section class="panel" id="queue">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Queue</span>
+              <h2>Playlist intake</h2>
+              <div class="sub">One URL per line. Jobs are persisted, retried with backoff, and committed batch by batch.</div>
+            </div>
+            <div class="panel-actions"><span class="chip" id="queueJobCount">0 jobs</span></div>
+          </div>
+          <div class="ingest-form">
+            <label class="field">
+              <span>Playlist URLs</span>
+              <textarea class="textarea" id="urls" rows="4" placeholder="https://youtube.com/playlist?list=…&#10;https://youtu.be/VIDEO_ID"></textarea>
+            </label>
+            <div class="form-row">
+              <label class="field" style="max-width:120px"><span>Limit</span><input class="input" id="queueLimit" type="number" min="1" placeholder="all"></label>
+              <button class="btn btn-primary" id="queueBtn" type="button"><svg class="icon"><use href="#i-queue"/></svg>Queue playlists</button>
+              <span class="hint-inline" id="queueMsg"></span>
+            </div>
+          </div>
+          <div class="table-scroll" style="margin-top:14px">
+            <table>
+              <thead><tr><th>Job</th><th>Source</th><th>Status</th><th>Stage</th><th>Added</th><th>Detail</th></tr></thead>
+              <tbody id="queueJobs"><tr><td colspan="6" class="empty-table">No jobs yet.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" id="metrics">
+          <div class="panel-head">
+            <div><span class="eyebrow">Metrics</span><h2>What the index knows</h2><div class="sub">Committed state only — build stats, language mix, provider chain and the weighted similarity model.</div></div>
+            <div class="panel-actions"><span class="chip" id="matrixShapeChip">— × —</span></div>
+          </div>
+          <div class="stats-grid" id="statsGrid"></div>
+          <div class="metric-grid">
+            <div class="metric-card"><h3>Languages</h3><div class="bars" id="languageBars"></div></div>
+            <div class="metric-card"><h3>Lyrics backends</h3><div class="bars" id="backendBars"></div></div>
+            <div class="metric-card"><h3>Similarity weights</h3><div class="bars" id="weightBars"></div></div>
+            <div class="metric-card"><h3>Allowed languages</h3><div class="chips" id="allowedList"></div><h3 style="margin-top:12px">Data files</h3><div class="chips" id="dataFiles"></div></div>
+          </div>
+          <div class="metric-card" style="margin-top:12px"><h3>Lyrics provider fallback chain</h3><div class="provider-chain" id="providersList"></div></div>
+          <div class="metric-card" style="margin-top:12px"><h3>Top terms by document frequency</h3><div class="chips" id="topTerms"></div></div>
+        </section>
+
+        <section class="panel" id="matrices">
+          <div class="panel-head">
+            <div><span class="eyebrow">Matrices</span><h2>The similarity graph</h2><div class="sub">A centrality-ranked preview. The full matrices stay on the API — the dashboard only pulls a small read-only slice.</div></div>
+            <div class="panel-actions"><button class="btn btn-ghost btn-sm" id="refreshMatrices" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Reload</button></div>
+          </div>
+          <div class="matrix-tabs" id="matrixTabs"></div>
+          <div class="matrix-meta" id="matrixMeta"></div>
+          <div class="matrix-wrap" id="matrixOut"><div class="empty-table">Loading a centrality-ranked matrix preview…</div></div>
+          <div class="matrix-legend"><span>Weak</span><div class="legend-gradient"></div><span>Strong</span><span class="spacer"></span><span id="matrixLegendLabel">unified</span></div>
+        </section>
+
+        <section class="panel" id="diagnostics">
+          <div class="panel-head">
+            <div><span class="eyebrow">Diagnostics</span><h2>Cache &amp; failed songs</h2><div class="sub">Negative results are retried in the background; this is the queue behind that worker.</div></div>
+            <div class="panel-actions"><button class="btn btn-primary btn-sm" id="retryBtn" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Retry now</button></div>
+          </div>
+          <div class="cache-cards">
+            <div class="stat-tile"><b id="cacheCached">0</b><span>Lyrics cached</span></div>
+            <div class="stat-tile"><b id="cacheFailed">0</b><span>Failed songs</span></div>
+            <div class="stat-tile"><b id="cacheAttempts">0</b><span>Max attempts</span></div>
+            <div class="stat-tile"><b id="cacheInterval">0s</b><span>Retry interval</span></div>
+          </div>
+          <div class="failed-list" id="failedList"><div class="empty-table">No failed songs. Everything the providers could resolve is in the index.</div></div>
+          <div class="diag-grid">
+            <div class="diag-card"><h3>Committed songs</h3><div class="chips" id="diagSongs"><span class="chip">—</span></div></div>
+            <div class="diag-card"><h3>Build summary</h3><div class="chips" id="diagBuild"><span class="chip">—</span></div></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var $$ = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
+
+  /* ---------------------------------------------------------------- endpoints */
+  // go-ui is the only origin this dashboard talks to. Every /api/* call is served
+  // by go-ui and answered from python-backend over gRPC; the browser never sees a
+  // database or a second host.
+  var API = (function () {
+    var override = new URLSearchParams(location.search).get("api");
+    if (override) return override.replace(/\/+$/, "");
+    return location.origin + "/api";
+  })();
+  var PLAYER_API = API;
+  var DOCS_URL = location.origin + "/docs";
+  var PLAYER_URL = "https://lirify.joscart.win";
+
+  function applyLinks() {
+    $("docsLink").href = DOCS_URL;
+    $("playerLink").href = PLAYER_URL;
+    $("topPlayerLink").href = PLAYER_URL;
+    if ($("heroPlayerLink")) $("heroPlayerLink").href = PLAYER_URL;
+  }
+  applyLinks();
+  fetch(API + "/config", { headers: { Accept: "application/json" } })
+    .then(function (response) { return response.json(); })
+    .then(function (cfg) {
+      if (cfg.player_url) PLAYER_URL = cfg.player_url;
+      if (cfg.docs_url) DOCS_URL = cfg.docs_url;
+      applyLinks();
+    })
+    .catch(function () { /* links keep their sane defaults */ });
+  $("domainLabel").textContent = location.host || "lirify";
+  try { $("apiBaseLabel").textContent = new URL(API).host + (API.endsWith("/api") ? " /api" : ""); }
+  catch (e) { $("apiBaseLabel").textContent = API; }
+
+  /* ---------------------------------------------------------------- helpers */
+  var compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+  var full = new Intl.NumberFormat("en");
+  function num(value) {
+    var n = Number(value || 0);
+    return Math.abs(n) > 9999 ? compact.format(n) : full.format(n);
+  }
+  function esc(value) {
+    return String(value === null || value === undefined ? "" : value).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function timeNow() { return new Date().toLocaleTimeString([], { hour12: false }); }
+  function clock(ts) {
+    if (!ts) return "—";
+    var d = new Date(Number(ts) * 1000);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleTimeString([], { hour12: false });
+  }
+  function ago(ts) {
+    if (!ts) return "—";
+    var seconds = Math.max(0, Math.floor(Date.now() / 1000 - Number(ts)));
+    if (seconds < 60) return seconds + "s ago";
+    if (seconds < 3600) return Math.floor(seconds / 60) + "m ago";
+    if (seconds < 86400) return Math.floor(seconds / 3600) + "h ago";
+    return Math.floor(seconds / 86400) + "d ago";
+  }
+  function icon(name) {
+    return '<svg class="icon" aria-hidden="true"><use href="#i-' + name + '"/></svg>';
+  }
+  function statusTone(value) {
+    var s = String(value || "").toLowerCase();
+    if (/commit|done|success|committed/.test(s)) return "good";
+    if (/error|gave|fail|bad/.test(s)) return "bad";
+    if (/queue|pending|wait/.test(s)) return "queued";
+    if (/skip|duplicate|muted/.test(s)) return "muted";
+    return "active";
+  }
+  function statusLabel(value) {
+    return String(value || "unknown").replace(/_/g, " ");
+  }
+
+  function toast(message, tone) {
+    var host = $("toasts");
+    var el = document.createElement("div");
+    el.className = "toast" + (tone === "error" ? " is-error" : "");
+    el.innerHTML = icon(tone === "error" ? "alert" : "sparkles") + "<span>" + esc(message) + "</span>";
+    host.appendChild(el);
+    while (host.children.length > 4) host.firstElementChild.remove();
+    setTimeout(function () {
+      el.classList.add("is-leaving");
+      setTimeout(function () { el.remove(); }, 220);
+    }, 3800);
+  }
+
+  /* ---------------------------------------------------------------- api */
+  function setApiState(ok, detail) {
+    var chip = $("apiChip");
+    var dot = $("apiDot");
+    chip.classList.toggle("is-off", !ok);
+    dot.classList.toggle("is-live", ok);
+    dot.classList.toggle("is-off", !ok);
+    $("apiChipText").textContent = ok ? "api live" : "api offline";
+    chip.title = detail || API;
+  }
+
+  async function api(path, options) {
+    var response = await fetch(API + path, Object.assign({
+      headers: { "Accept": "application/json" }
+    }, options || {}));
+    var text = await response.text();
+    var data;
+    try { data = text ? JSON.parse(text) : null; }
+    catch (e) { data = text; }
+    if (!response.ok) {
+      var detail = data && data.detail ? data.detail : (typeof data === "string" ? data : response.statusText);
+      var error = new Error(detail || ("HTTP " + response.status));
+      error.status = response.status;
+      throw error;
+    }
+    setApiState(true);
+    return data;
+  }
+
+  /* ---------------------------------------------------------------- state */
+  var state = {
+    stats: null,
+    queue: null,
+    cache: null,
+    matrices: null,
+    matrixName: "unified",
+    events: [],
+    lastIds: [],
+    busy: false,
+    retrying: false,
+    refreshTimer: 0
+  };
+
+  /* ---------------------------------------------------------------- events */
+  var EVENT_TONES = {
+    connected: "info", start: "active", status: "active", extracted: "success",
+    song: "success", song_retry: "success", song_error: "error", filtered: "warn",
+    language_skipped: "warn", stashed: "success", queued: "success",
+    queued_batch: "success", queued_job: "success", skipped: "warn",
+    recovered: "warn", retry_scheduled: "warn", requeued: "warn",
+    gave_up: "error", done: "success", error: "error", pong: "info"
+  };
+  var EVENT_TEXT = {
+    connected: "connected", start: "job started", status: "stage", extracted: "extracted",
+    song: "song scraped", song_retry: "lyric retry", song_error: "song failed",
+    filtered: "commit filter", language_skipped: "language skipped", stashed: "stash ready",
+    queued: "queued", queued_batch: "queued batch", skipped: "skipped",
+    recovered: "recovered", retry_scheduled: "retry scheduled", requeued: "requeued",
+    gave_up: "gave up", done: "done", error: "error", pong: "pong"
+  };
+
+  function logEvent(type, message, detail) {
+    state.events.unshift({ type: type || "info", message: String(message || ""), detail: detail || "", ts: Date.now() });
+    if (state.events.length > 160) state.events.length = 160;
+    renderEvents();
+    $("lastEvent").textContent = timeNow();
+  }
+
+  function renderEvents() {
+    var host = $("stream");
+    $("eventCount").textContent = state.events.length;
+    if (!state.events.length) { host.innerHTML = ""; return; }
+    host.innerHTML = state.events.map(function (event) {
+      var tone = EVENT_TONES[event.type] || "info";
+      return '<div class="event ev-' + tone + '">' +
+        '<time>' + new Date(event.ts).toLocaleTimeString([], { hour12: false }) + '</time>' +
+        '<span class="event-type">' + esc(EVENT_TEXT[event.type] || event.type) + '</span>' +
+        '<span class="event-text">' + esc(event.message) + (event.detail ? '<small>' + esc(event.detail) + '</small>' : '') + '</span>' +
+        '</div>';
+    }).join("");
+  }
+
+  function clearEvents() {
+    state.events = [];
+    renderEvents();
+    toast("Event log cleared");
+  }
+
+  /* ---------------------------------------------------------------- live stream */
+  // The old implementation held a WebSocket to python-backend. A stateless
+  // deployment cannot: go-ui subscribes to the gRPC stats stream and re-publishes
+  // it as Server-Sent Events, so only go-ui ever dials python-backend.
+  var stream = null;
+  var wsReady = false;
+  var reconnectDelay = 1000;
+
+  function setWs(mode, text) {
+    var chip = $("wsChip");
+    chip.classList.toggle("is-live", mode === "live");
+    chip.classList.toggle("is-off", mode === "off");
+    $("wsChipText").textContent = text;
+    $("wsDot").className = "dot" + (mode === "live" ? " is-live" : mode === "off" ? " is-off" : "");
+    $("sideDot").className = "dot" + (mode === "live" ? " is-live" : mode === "off" ? " is-off" : "");
+    $("wsSide").textContent = mode === "live" ? "Live stats stream (gRPC → SSE)" : mode === "off" ? "Disconnected" : "Connecting to python-backend";
+    chip.title = "Stats stream " + text;
+    chip.setAttribute("aria-label", "Stats stream " + text);
+  }
+
+  function connectWS() {
+    setWs("connecting", "connecting");
+    try {
+      if (stream) stream.close();
+      stream = new EventSource(API + "/events");
+    } catch (error) { setWs("off", "unavailable"); return; }
+    stream.onopen = function () {
+      wsReady = true;
+      reconnectDelay = 1000;
+      setWs("live", "live");
+      refreshAll({ quiet: true });
+    };
+    stream.onerror = function () {
+      wsReady = false;
+      setWs("off", "reconnecting");
+      logEvent("error", "Stats stream interrupted · reconnecting in " + Math.round(reconnectDelay / 1000) + "s");
+      reconnectDelay = Math.min(reconnectDelay * 1.7, 15000);
+    };
+    stream.onmessage = function (message) {
+      var data;
+      try { data = JSON.parse(message.data); }
+      catch (error) { return; }
+      handleEvent(data);
+    };
+  }
+
+  async function postJSON(path, body) {
+    var response = await fetch(API + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body || {})
+    });
+    var text = await response.text();
+    var data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (error) { data = text; }
+    if (!response.ok) {
+      var detail = data && data.detail ? data.detail : (typeof data === "string" ? data : "HTTP " + response.status);
+      throw new Error(detail);
+    }
+    setApiState(true);
+    return data;
+  }
+
+  function sendJob(action, url, limit) {
+    if (!wsReady) { toast("The stats stream is still connecting; try again in a second.", "error"); return false; }
+    var path = action === "extract" ? "/extract" : "/index";
+    var body = { url: url, limit: limit || null, source: "go-webui" };
+    logEvent("start", action + " requested", url);
+    postJSON(path, body)
+      .then(function (data) {
+        if (action === "extract") {
+          renderIds((data && data.ids) || []);
+          setProgress(100, "Extracted", num((data && data.count) || 0) + " video IDs extracted", "—", "done");
+          logEvent("extracted", "Extracted " + num((data && data.count) || 0) + " video IDs");
+          setBusy(false);
+        } else {
+          var job = (data && data.job) || {};
+          setProgress(4, "Queued", "Job " + (job.job_id || "—") + " accepted", "—", "active");
+          logEvent("queued", "Index job accepted", job.job_id || url);
+          refreshQueue().catch(function () {});
+        }
+      })
+      .catch(function (error) {
+        setBusy(false);
+        toast(action + " failed: " + error.message, "error");
+        logEvent("error", action + " failed", error.message);
+      });
+    return true;
+  }
+
+  function queuePlaylists(urls, limit) {
+    return postJSON("/queue", { urls: urls, limit: limit || null, source: "go-webui" })
+      .then(function (data) {
+        logEvent("queued_batch", "Queued " + ((data && data.queued) || 0) + " playlists", "queue " + ((data && data.queue_size) || 0));
+        return data;
+      });
+  }
+
+  /* ---------------------------------------------------------------- progress */
+  function setProgress(percent, stage, status, counter, tone) {
+    var value = Math.max(0, Math.min(100, Number(percent) || 0));
+    $("bar").style.width = value + "%";
+    $("progressPct").textContent = Math.round(value) + "%";
+    if (stage !== undefined) $("stageLabel").textContent = stage;
+    if (status !== undefined) $("jobStatus").textContent = status || "";
+    if (counter !== undefined) $("jobCounter").textContent = counter || "—";
+    var card = $("progressCard");
+    card.classList.toggle("is-error", tone === "error");
+    card.classList.toggle("is-running", tone !== "error" && tone !== "done" && value < 100);
+  }
+
+  function setBusy(busy, label) {
+    state.busy = busy;
+    $("extractBtn").disabled = busy;
+    $("indexBtn").disabled = busy;
+    $("ingestBadge").textContent = busy ? (label || "working") : "idle";
+    $("ingestBadge").className = "chip" + (busy ? " accent" : "");
+  }
+
+  function renderIds(ids) {
+    state.lastIds = Array.isArray(ids) ? ids.slice() : [];
+    $("extractCount").textContent = state.lastIds.length;
+    $("extractOut").hidden = !state.lastIds.length;
+    var shown = state.lastIds.slice(0, 80);
+    $("extractIds").innerHTML = shown.map(function (id) {
+      return '<span class="id-chip">' + esc(id) + '</span>';
+    }).join("") + (state.lastIds.length > shown.length ? '<span class="id-chip">+' + (state.lastIds.length - shown.length) + ' more</span>' : "");
+  }
+
+  /* ---------------------------------------------------------------- stats */
+  function bars(target, object, limit) {
+    var entries = Object.entries(object || {}).sort(function (a, b) { return b[1] - a[1]; }).slice(0, limit || 8);
+    if (!entries.length) { target.innerHTML = '<span class="chip">no data</span>'; return; }
+    var max = Math.max.apply(null, entries.map(function (entry) { return Number(entry[1]) || 0; })) || 1;
+    target.innerHTML = entries.map(function (entry) {
+      var width = Math.max(4, Math.round((Number(entry[1]) || 0) / max * 100));
+      return '<div class="bar-row"><span title="' + esc(entry[0]) + '">' + esc(entry[0]) + '</span>' +
+        '<span class="bar-count">' + num(entry[1]) + '</span>' +
+        '<div class="bar"><i style="width:' + width + '%"></i></div></div>';
+    }).join("");
+  }
+
+  function chips(target, values) {
+    var list = (values || []).filter(function (value) { return value !== null && value !== undefined && value !== ""; });
+    target.innerHTML = list.length
+      ? list.map(function (value) { return '<span class="chip">' + esc(value) + '</span>'; }).join("")
+      : '<span class="chip">—</span>';
+  }
+
+  function statTile(label, value, iconName) {
+    return '<div class="stat-tile">' + icon(iconName) + '<b>' + value + '</b><span>' + esc(label) + '</span></div>';
+  }
+
+  async function refreshStats() {
+    var s = await api("/stats");
+    state.stats = s;
+    var queue = s.queue || {};
+    var pending = Number(queue.playlist_pending || 0) + Number(queue.matrix_pending || 0);
+
+    $("heroSongs").textContent = num(s.indexed_songs);
+    $("heroTerms").textContent = num(s.inverted_terms);
+    $("heroTokens").textContent = num(s.lyrics_tokens);
+    $("heroQueue").textContent = num(pending);
+    $("sideSongs").textContent = num(s.indexed_songs);
+    $("sideTerms").textContent = num(s.vocabulary_size);
+    $("tileSongs").textContent = num(s.indexed_songs);
+    $("tileTerms").textContent = num(s.inverted_terms);
+    $("tileTokens").textContent = num(s.lyrics_tokens);
+    $("tileQueue").textContent = num(pending);
+
+    $("statsGrid").innerHTML = [
+      statTile("Indexed songs", num(s.indexed_songs), "music"),
+      statTile("Video IDs", num(s.video_ids), "link"),
+      statTile("Vocabulary", num(s.vocabulary_size), "database"),
+      statTile("Inverted terms", num(s.inverted_terms), "matrix"),
+      statTile("Lyric tokens", num(s.lyrics_tokens), "sparkles"),
+      statTile("Matrix", (s.matrix_shape || [0, 0]).join(" × "), "overview")
+    ].join("");
+
+    $("matrixShapeChip").textContent = (s.matrix_shape || [0, 0]).join(" × ");
+    $("allowedChip").textContent = (s.allowed_languages || []).join(" + ") + " only";
+    $("allowedList").innerHTML = (s.allowed_languages || []).map(function (code) {
+      return '<span class="chip good">' + esc(code) + '</span>';
+    }).join("") || '<span class="chip">—</span>';
+
+    bars($("languageBars"), s.languages, 10);
+    bars($("backendBars"), s.backends, 10);
+
+    var weights = s.weights || {};
+    var weightTarget = $("weightBars");
+    weightTarget.innerHTML = Object.entries(weights).map(function (entry) {
+      var pct = Math.round((Number(entry[1]) || 0) * 100);
+      return '<div class="bar-row"><span>' + esc(entry[0]) + '</span><span class="bar-count">' + pct + '%</span>' +
+        '<div class="bar"><i style="width:' + pct + '%"></i></div></div>';
+    }).join("") || '<span class="chip">—</span>';
+
+    var providers = s.lyrics_providers || [];
+    $("providersList").innerHTML = providers.map(function (name, index) {
+      return (index ? '<span class="provider-arrow">→</span>' : '') +
+        '<span class="provider"><i>' + (index + 1) + '</i>' + esc(name) + '</span>';
+    }).join("") || '<span class="chip">No providers</span>';
+
+    chips($("topTerms"), s.top_terms || []);
+    chips($("dataFiles"), s.files || []);
+
+    $("diagSongs").innerHTML =
+      '<span class="chip">' + num(s.indexed_songs) + ' songs</span>' +
+      '<span class="chip">' + num(s.vocabulary_size) + ' terms</span>' +
+      '<span class="chip">' + num(s.lyrics_tokens) + ' tokens</span>';
+    $("diagBuild").innerHTML =
+      Object.entries(s.backends || {}).map(function (entry) {
+        return '<span class="chip">' + esc(entry[0]) + ' · ' + num(entry[1]) + '</span>';
+      }).join("") || '<span class="chip">—</span>';
+
+    if (queue.cached_lyrics !== undefined) $("cacheCachedMini").textContent = num(queue.cached_lyrics);
+    if (queue.failed_songs !== undefined) $("cacheFailedMini").textContent = num(queue.failed_songs);
+
+    $("lastRefresh").textContent = "Updated " + timeNow() + " · API " + API.replace(/^https?:\/\//, "");
+    setApiState(true);
+    return s;
+  }
+
+  /* ---------------------------------------------------------------- queue */
+  function renderJobs(jobs) {
+    var target = $("queueJobs");
+    if (!jobs || !jobs.length) {
+      target.innerHTML = '<tr><td colspan="6" class="empty-table">No jobs yet. Queue a playlist to start the pipeline.</td></tr>';
+      return;
+    }
+    target.innerHTML = jobs.slice(0, 40).map(function (job) {
+      var status = String(job.status || job.stage || "unknown");
+      var tone = statusTone(status);
+      var detail = job.reason || job.error || "";
+      var stage = job.stage || "—";
+      var url = job.url || "";
+      return '<tr>' +
+        '<td><span class="mono" title="' + esc(job.job_id || "") + '">' + esc(String(job.job_id || "").slice(0, 22)) + '</span></td>' +
+        '<td class="url-cell" title="' + esc(url) + '">' + esc(url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 62) || "—") + '</td>' +
+        '<td><span class="status ' + tone + '">' + esc(statusLabel(status)) + '</span></td>' +
+        '<td><span class="mono">' + esc(stage) + '</span></td>' +
+        '<td>' + (job.added === undefined || job.added === null ? '—' : num(job.added)) + '</td>' +
+        '<td class="reason-cell" title="' + esc(detail) + '">' + esc(detail || '—') + '</td>' +
+        '</tr>';
+    }).join("");
+  }
+
+  async function refreshQueue() {
+    var q = await api("/queue");
+    state.queue = q;
+    $("qPlaylist").textContent = num(q.playlist_queue);
+    $("qMatrix").textContent = num(q.matrix_queue);
+    $("qStash").textContent = num(q.stashed_batches);
+    $("qCache").textContent = num(q.cached_lyrics);
+    $("qFailed").textContent = num(q.failed_songs);
+    var jobs = q.jobs || [];
+    $("queueJobCount").textContent = jobs.length + (jobs.length === 1 ? " job" : " jobs");
+    $("cacheCachedMini").textContent = num(q.cached_lyrics);
+    $("cacheFailedMini").textContent = num(q.failed_songs);
+    var pending = Number(q.playlist_queue || 0) + Number(q.matrix_queue || 0);
+    $("queueBadge").textContent = pending ? pending + " pending" : "Pipeline idle";
+    renderJobs(jobs);
+    return q;
+  }
+
+  /* ---------------------------------------------------------------- cache */
+  async function refreshCache() {
+    var data = await api("/cache");
+    state.cache = data;
+    $("cacheCached").textContent = num(data.cached_lyrics);
+    $("cacheFailed").textContent = num(data.failed_songs);
+    $("cacheAttempts").textContent = num(data.max_attempts);
+    $("cacheInterval").textContent = num(data.retry_interval_seconds) + "s";
+    var failed = data.failed || [];
+    var host = $("failedList");
+    if (!failed.length) {
+      host.innerHTML = '<div class="empty-table">No failed songs. Everything the providers could resolve is in the index.</div>';
+      return;
+    }
+    host.innerHTML = failed.map(function (song) {
+      return '<div class="failed-item">' +
+        '<a class="vid" href="https://youtu.be/' + encodeURIComponent(song.video_id || "") + '" target="_blank" rel="noreferrer" title="Open on YouTube">' + esc(song.video_id || "—") + '</a>' +
+        '<div class="meta"><b>' + esc(song.title || "Untitled") + '</b><span>' + esc(song.artist || "Unknown") + ' · ' + esc(song.reason || "no lyrics") + '</span></div>' +
+        '<span class="attempts" title="Last try">' + num(song.attempts || 0) + '×<br>' + ago(song.last_try) + '</span>' +
+        '</div>';
+    }).join("");
+  }
+
+  async function retryFailed() {
+    if (state.retrying) return;
+    state.retrying = true;
+    var buttons = ["retryBtn", "retryMini"].map($);
+    buttons.forEach(function (button) { if (button) { button.disabled = true; button.dataset.label = button.innerHTML; button.innerHTML = icon("refresh") + "Retrying…"; } });
+    try {
+      var result = await api("/retry", { method: "POST" });
+      toast("Retry pass finished · " + (result.message || "check the queue"), "info");
+      await Promise.allSettled([refreshCache(), refreshQueue(), refreshStats()]);
+    } catch (error) {
+      toast("Retry failed: " + error.message, "error");
+    } finally {
+      state.retrying = false;
+      buttons.forEach(function (button) { if (button) { button.disabled = false; button.classList.remove("is-busy"); if (button.dataset.label) button.innerHTML = button.dataset.label; } });
+    }
+  }
+
+  /* ---------------------------------------------------------------- matrices */
+  async function loadMatrices(force) {
+    if (state.matrices && !force) return state.matrices;
+    var response = await fetch(API + "/matrices/preview?size=16", { headers: { "Accept": "application/json" } });
+    if (response.status === 404) {
+      state.matrices = null;
+      $("matrixTabs").innerHTML = "";
+      $("matrixMeta").innerHTML = '<span class="chip">waiting for an index</span>';
+      $("matrixOut").innerHTML = '<div class="empty-table">Index a playlist to compute the similarity matrices.</div>';
+      return null;
+    }
+    if (!response.ok) throw new Error("Matrix preview failed (" + response.status + ")");
+    var data = await response.json();
+    state.matrices = data;
+    var names = Object.keys(data.matrices || {});
+    if (!names.includes(state.matrixName)) state.matrixName = names.includes("unified") ? "unified" : names[0];
+    $("matrixTabs").innerHTML = names.map(function (name) {
+      return '<button type="button" class="matrix-tab' + (name === state.matrixName ? " is-active" : "") + '" data-matrix="' + esc(name) + '">' + esc(name) + '</button>';
+    }).join("");
+    $("matrixMeta").innerHTML =
+      '<span class="chip">' + data.shape[0] + ' × ' + data.shape[1] + '</span>' +
+      '<span class="chip">top ' + data.size + ' by centrality</span>' +
+      '<span class="chip">' + names.length + ' matrices</span>';
+    renderMatrix(state.matrixName);
+    return data;
+  }
+
+  function renderMatrix(name) {
+    var data = state.matrices;
+    if (!data || !data.matrices || !data.matrices[name]) {
+      $("matrixOut").innerHTML = '<div class="empty-table">Index a playlist to compute the similarity matrices.</div>';
+      return;
+    }
+    state.matrixName = name;
+    $$(".matrix-tab").forEach(function (tab) {
+      tab.classList.toggle("is-active", tab.dataset.matrix === name);
+    });
+    var matrix = data.matrices[name];
+    var songs = data.songs || [];
+    var values = matrix.values || [];
+    var head = '<table class="matrix-table"><thead><tr><th style="min-width:168px">Song</th>';
+    for (var c = 0; c < values.length; c++) {
+      head += '<th title="' + esc(songs[c] ? songs[c].title + " — " + songs[c].artist : "Column " + (c + 1)) + '">' + String(c + 1).padStart(2, "0") + '</th>';
+    }
+    head += '</tr></thead><tbody>';
+    for (var r = 0; r < values.length; r++) {
+      var song = songs[r] || {};
+      head += '<tr><th title="' + esc((song.title || "") + " — " + (song.artist || "")) + '"><span>' + esc((song.title || "—").slice(0, 26)) + '</span><span>' + esc(song.artist || "") + '</span></th>';
+      for (var j = 0; j < values[r].length; j++) {
+        var value = Number(values[r][j]) || 0;
+        var alpha = (0.05 + Math.min(1, Math.max(0, value)) * 0.68).toFixed(3);
+        var color = value > 0.52 ? "#fff" : "var(--text-3)";
+        head += '<td class="matrix-cell" title="' + esc((song.title || "") + " ↔ " + ((songs[j] || {}).title || "") + " · " + value.toFixed(3)) + '" style="background:rgba(180,139,255,' + alpha + ');color:' + color + '">' + value.toFixed(2) + '</td>';
+      }
+      head += '</tr>';
+    }
+    head += '</tbody></table>';
+    $("matrixOut").innerHTML = head;
+    $("matrixLegendLabel").textContent = name + " · " + (matrix.shape || data.shape).join(" × ");
+  }
+
+  /* ---------------------------------------------------------------- event handling */
+  function handleEvent(d) {
+    var type = d.event || "info";
+    var detail = d.job_id ? "job " + d.job_id : "";
+    switch (type) {
+      case "stats":
+        // Heartbeat from the gRPC watch stream: refresh counters quietly.
+        refreshAll({ quiet: true });
+        break;
+      case "connected":
+        setWs("live", "live");
+        logEvent("connected", "Stream ready · " + num(d.indexed_songs) + " songs already indexed");
+        break;
+      case "start":
+        setBusy(true, d.action);
+        setProgress(0, d.action === "extract" ? "Extracting IDs" : "Starting job", "Job " + (d.job_id || "—") + " started", "—", "active");
+        logEvent("start", (d.action || "job") + " started", detail);
+        break;
+      case "status":
+        if (!d.stage) break;
+        if (d.stage) {
+          $("stageLabel").textContent = d.stage;
+          $("jobStatus").textContent = d.message || "";
+          $("jobCounter").textContent = d.total ? "0/" + d.total : ($("jobCounter").textContent || "—");
+        }
+        if (d.added !== undefined) $("jobStatus").textContent = "Committed " + d.added + " songs";
+        logEvent("status", "[" + (d.stage || "stage") + "] " + (d.message || ""), detail);
+        break;
+      case "extracted":
+        renderIds(d.ids || []);
+        setProgress(100, "Extracted", num(d.count) + " video IDs extracted", "—", "done");
+        setBusy(false);
+        logEvent("extracted", "Extracted " + num(d.count) + " video IDs", detail);
+        break;
+      case "song":
+        setProgress((Number(d.progress) || 0) * 100, "Scraping lyrics", (d.title || "") + " · " + (d.artist || ""), (d.index || 0) + "/" + (d.total || 0), "active");
+        logEvent("song", "#" + d.index + "/" + d.total + " " + (d.artist || "") + " — " + (d.title || ""), (d.language || "?") + " · " + (d.backend || "no lyrics") + (d.has_lyrics === false ? " · skipped" : ""));
+        break;
+      case "song_retry":
+        logEvent("song_retry", "Retry " + d.index + "/" + d.total + " " + (d.artist || "") + " — " + (d.title || ""), "resolved by " + (d.backend || "provider"));
+        break;
+      case "song_error":
+        logEvent("song_error", "#" + d.index + "/" + d.total + " " + d.video_id + " failed", d.message || "");
+        break;
+      case "filtered":
+        logEvent("filtered", "Kept " + num(d.kept) + " · skipped " + num(d.skipped) + " songs", (d.no_lyrics !== undefined ? d.no_lyrics + " without lyrics" : "") + (d.language_skipped !== undefined ? " · " + d.language_skipped + " outside " + (d.allowed_languages || []).join("/") : ""));
+        break;
+      case "language_skipped":
+        logEvent("language_skipped", (d.artist || "") + " — " + (d.title || ""), "language " + (d.language || "?") + " not committed");
+        break;
+      case "stashed":
+        setProgress(90, "Stashed", "Batch waiting for the matrix worker", num(d.docs) + " songs", "active");
+        logEvent("stashed", "Stash ready · " + num(d.docs) + " songs, " + num(d.terms) + " terms", detail);
+        refreshQueue().catch(function () {});
+        break;
+      case "queued":
+        logEvent("queued", "Queued " + (d.url || "playlist"), "playlist queue " + (d.queue_size || 0));
+        refreshQueue().catch(function () {});
+        break;
+      case "queued_batch":
+        logEvent("queued_batch", "Queued " + num(d.count) + " playlists", "playlist queue " + (d.queue_size || 0));
+        refreshQueue().catch(function () {});
+        break;
+      case "skipped":
+        setProgress(100, "Skipped", d.reason || "No new eligible songs", "—", "done");
+        setBusy(false);
+        logEvent("skipped", "Skipped: " + (d.reason || "duplicate batch"), detail);
+        refreshQueue().catch(function () {});
+        break;
+      case "recovered":
+        logEvent("recovered", "Resumed saved job from queue state", (d.message || "") + " · attempts " + (d.attempts || 0));
+        refreshQueue().catch(function () {});
+        break;
+      case "retry_scheduled":
+        logEvent("retry_scheduled", "Retry #" + (d.attempts || 0) + " in " + (d.delay || 0) + "s", d.message || "");
+        refreshQueue().catch(function () {});
+        break;
+      case "requeued":
+        logEvent("requeued", "Job requeued · attempt " + (d.attempts || 0), detail);
+        refreshQueue().catch(function () {});
+        break;
+      case "gave_up":
+        setProgress(0, "Gave up", d.message || "Job failed permanently", "—", "error");
+        setBusy(false);
+        logEvent("gave_up", d.message || "Job gave up", detail);
+        refreshQueue().catch(function () {});
+        break;
+      case "done":
+        setProgress(100, "Done", d.action === "index" ? "Index committed" : "IDs extracted", "—", "done");
+        setBusy(false);
+        if (d.action === "index" && d.stats) {
+          logEvent("done", "Index ready · " + num(d.stats.songs_indexed) + " songs, " + num(d.stats.vocabulary_size) + " terms", detail);
+          toast("Index committed · " + num(d.added || 0) + " new songs");
+          scheduleRefresh();
+        } else {
+          logEvent("done", (d.action || "job") + " finished · " + num(d.count) + " IDs", detail);
+        }
+        refreshQueue().catch(function () {});
+        break;
+      case "error":
+        setProgress(0, "Error", d.message || "Unknown error", "—", "error");
+        setBusy(false);
+        logEvent("error", d.message || "Unknown error", detail);
+        toast(d.message || "Indexer error", "error");
+        break;
+      case "pong":
+        logEvent("pong", "Pong");
+        break;
+      default:
+        logEvent(type, d.message || JSON.stringify(d).slice(0, 160), detail);
+    }
+  }
+
+  function scheduleRefresh() {
+    clearTimeout(state.refreshTimer);
+    state.refreshTimer = setTimeout(function () {
+      refreshStats().catch(function () {});
+      refreshCache().catch(function () {});
+      loadMatrices(true).catch(function () {});
+    }, 900);
+  }
+
+  /* ---------------------------------------------------------------- refresh loop */
+  async function refreshAll(options) {
+    var quiet = options && options.quiet;
+    var results = await Promise.allSettled([
+      refreshStats(), refreshQueue(), refreshCache(), loadMatrices(false)
+    ]);
+    var failed = results.filter(function (result) {
+      return result.status === "rejected" && (!result.reason || !result.reason.status || result.reason.status >= 500);
+    });
+    if (failed.length) {
+      setApiState(false, failed[0].reason && failed[0].reason.message);
+      if (!quiet) toast("Some dashboard panels could not refresh.", "error");
+    } else if (!quiet) {
+      toast("Dashboard refreshed");
+    }
+  }
+
+  /* ---------------------------------------------------------------- bindings */
+  $("clearEvents").addEventListener("click", clearEvents);
+  $("hideIds").addEventListener("click", function () { $("extractOut").hidden = true; });
+  $("copyIds").addEventListener("click", function () {
+    if (!state.lastIds.length) return;
+    navigator.clipboard.writeText(state.lastIds.join("\n")).then(function () { toast("Copied " + state.lastIds.length + " video IDs"); })
+      .catch(function () { toast("Could not copy IDs", "error"); });
+  });
+
+  $("extractBtn").addEventListener("click", function () {
+    var url = $("url").value.trim();
+    if (!url) { toast("Paste a YouTube URL first", "error"); $("url").focus(); return; }
+    setBusy(true, "extracting");
+    setProgress(0, "Extracting IDs", "Reading the playlist with yt-dlp…", "—", "active");
+    $("extractOut").hidden = true;
+    if (!sendJob("extract", url, null)) setBusy(false);
+  });
+
+  $("indexBtn").addEventListener("click", function () {
+    var url = $("url").value.trim();
+    if (!url) { toast("Paste a YouTube URL first", "error"); $("url").focus(); return; }
+    var limit = $("limit").value ? Number($("limit").value) : null;
+    setBusy(true, "indexing");
+    setProgress(0, "Starting index", "Scraping lyrics and building the stash…", "—", "active");
+    if (!sendJob("index", url, limit)) setBusy(false);
+  });
+
+  $("url").addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $("indexBtn").click();
+    }
+  });
+
+  $("queueBtn").addEventListener("click", function () {
+    var urls = $("urls").value.split("\n").map(function (line) { return line.trim(); }).filter(Boolean);
+    if (!urls.length) { $("queueMsg").textContent = "Add at least one URL."; return; }
+    if (!wsReady) { $("queueMsg").textContent = "The stats stream is not connected."; toast("The stats stream is not connected.", "error"); return; }
+    var limit = $("queueLimit").value ? Number($("queueLimit").value) : null;
+    $("queueMsg").textContent = "Queuing " + urls.length + " playlist" + (urls.length === 1 ? "" : "s") + "…";
+    queuePlaylists(urls, limit).then(function (data) {
+      $("queueMsg").textContent = "Queued " + ((data && data.queued) || urls.length) + " playlist" + (urls.length === 1 ? "" : "s") + ".";
+      $("urls").value = "";
+      refreshQueue().catch(function () {});
+    }).catch(function (error) {
+      $("queueMsg").textContent = error.message;
+      toast(error.message, "error");
+    });
+  });
+
+  ["retryBtn", "retryMini"].forEach(function (id) {
+    var button = $(id);
+    if (button) button.addEventListener("click", retryFailed);
+  });
+
+  $("refreshQueue").addEventListener("click", function () { refreshQueue().then(function () { toast("Queue refreshed"); }).catch(function (error) { toast(error.message, "error"); }); });
+  $("refreshAll").addEventListener("click", function () {
+    refreshAll({ quiet: false });
+    loadMatrices(true).catch(function () {});
+  });
+  $("refreshMatrices").addEventListener("click", function () {
+    loadMatrices(true).then(function () { toast("Matrix preview reloaded"); }).catch(function (error) { toast(error.message, "error"); });
+  });
+
+  $("matrixTabs").addEventListener("click", function (event) {
+    var tab = event.target.closest("[data-matrix]");
+    if (!tab) return;
+    renderMatrix(tab.dataset.matrix);
+  });
+
+  document.addEventListener("click", function (event) {
+    var scrollTarget = event.target.closest("[data-scroll]");
+    if (scrollTarget) {
+      var section = $(scrollTarget.dataset.scroll);
+      if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[href^="#"]'), function (link) {
+    link.addEventListener("click", function (event) {
+      var id = (link.getAttribute("href") || "").slice(1);
+      var section = id ? $(id) : null;
+      if (!section) return;
+      event.preventDefault();
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+      closeMenu();
+      setActiveNav(id);
+    });
+  });
+
+  /* ---------------------------------------------------------------- nav / mobile */
+  function setActiveNav(id) {
+    $$(".nav-item").forEach(function (item) {
+      item.classList.toggle("is-active", item.dataset.nav === id);
+    });
+    var labels = { overview: "Overview", ingest: "Ingest", queue: "Queue", metrics: "Metrics", matrices: "Matrices", diagnostics: "Diagnostics" };
+    if (labels[id]) $("crumbPage").textContent = labels[id];
+  }
+
+  var sections = ["overview", "ingest", "queue", "metrics", "matrices", "diagnostics"];
+  function updateActiveFromScroll() {
+    var scroller = $("scroll");
+    var anchor = scroller.getBoundingClientRect().top + 150;
+    var active = sections[0];
+    sections.forEach(function (id) {
+      var section = $(id);
+      if (section && section.getBoundingClientRect().top <= anchor) active = id;
+    });
+    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 12) {
+      active = sections[sections.length - 1];
+    }
+    setActiveNav(active);
+  }
+
+  $("scroll").addEventListener("scroll", function () {
+    $("topbar").classList.toggle("is-stuck", $("scroll").scrollTop > 8);
+    updateActiveFromScroll();
+  }, { passive: true });
+
+  function closeMenu() {
+    document.body.dataset.menu = "closed";
+    $("btnMenu").setAttribute("aria-expanded", "false");
+  }
+  $("btnMenu").addEventListener("click", function () {
+    var open = document.body.dataset.menu === "open";
+    document.body.dataset.menu = open ? "closed" : "open";
+    $("btnMenu").setAttribute("aria-expanded", String(!open));
+  });
+  $("scrim").addEventListener("click", closeMenu);
+  $("sideClose").addEventListener("click", closeMenu);
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+      if (document.body.dataset.menu === "open") closeMenu();
+    }
+  });
+
+  /* ---------------------------------------------------------------- boot */
+  setBusy(false);
+  setProgress(0, "Idle", "No indexing job running", "—", "done");
+  logEvent("info", "Dashboard ready · " + API);
+  connectWS();
+  refreshAll({ quiet: true });
+  setInterval(function () { refreshQueue().catch(function () {}); }, 5000);
+  setInterval(function () { refreshStats().catch(function () {}); }, 20000);
+  setInterval(function () { refreshCache().catch(function () {}); }, 30000);
+
+  window.__indexer = { state: state, refreshAll: refreshAll, handleEvent: handleEvent, logEvent: logEvent, API: API };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+---
+import Icon from "./Icon.astro";
+---
+
+<aside class="lyrics-panel" id="lyrics-panel" aria-label="Synced lyrics" aria-hidden="true">
+  <div class="lyrics-head">
+    <div class="lyrics-track">
+      <span class="eyebrow">Lyrics</span>
+      <b id="lyrics-title">Nothing playing</b>
+      <span id="lyrics-artist">Choose a track to follow along</span>
+    </div>
+    <div class="lyrics-tools">
+      <div class="lyrics-offset" aria-label="Lyrics offset">
+        <button id="lyrics-offset-minus" aria-label="Show lyrics earlier">−</button>
+        <span id="lyrics-offset">0.0s</span>
+        <button id="lyrics-offset-plus" aria-label="Show lyrics later">+</button>
+      </div>
+      <button class="icon-btn tiny" id="lyrics-expand" aria-label="Expand lyrics" data-tip="Expand">
+        <Icon name="expand" size={15} />
+      </button>
+      <button class="icon-btn tiny" id="lyrics-close" aria-label="Close lyrics">
+        <Icon name="close" size={15} />
+      </button>
+    </div>
+  </div>
+
+  <div class="lyrics-meta">
+    <span class="chip" id="lyrics-source">lyrics</span>
+    <span class="chip" id="lyrics-sync" data-state="plain">waiting</span>
+    <span class="spacer"></span>
+  </div>
+
+  <div class="lyrics-body" id="lyrics-body">
+    <div class="lyrics-lines" id="lyrics-list"></div>
+    <div class="lyrics-empty" id="lyrics-empty" hidden>
+      <Icon name="mic" size={34} />
+      <p data-empty-text>Play a track to load its lyrics.</p>
+    </div>
+    <button class="lyrics-follow" id="lyrics-follow" type="button">
+      <Icon name="wave" size={14} />
+      Follow lyrics
+    </button>
+  </div>
+</aside>

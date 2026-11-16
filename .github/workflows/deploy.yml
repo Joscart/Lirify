@@ -1,0 +1,281 @@
+name: Deploy Lirify to Cloud Run
+
+# Push to main is the only deploy trigger. `workflow_dispatch` exists for
+# re-deploys of an existing commit (for example after rotating a secret).
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "skills/**"
+  workflow_dispatch:
+    inputs:
+      enable_domain_mappings:
+        description: "Create Cloud Run domain mappings (domains must be verified first)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write # Workload Identity Federation
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  AR_REPOSITORY: lirify
+  SERVICE_PYTHON: lirify-api
+  SERVICE_WEB: lirify-web
+  SERVICE_GO: lirify-index
+  PYTHON_VERSION: "3.11"
+  GO_VERSION: "1.22"
+  NODE_VERSION: "22"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Contract + build verification. No cloud credentials in this job.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: Verify contract and builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: services/api/requirements.txt
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: services/go-ui/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/web/package-lock.json
+
+      - name: Install protoc, Python and Go gRPC plugins
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler
+          protoc --version
+          python -m pip install --upgrade pip
+          # Pinned so generated Python stubs stay byte-identical across runs.
+          pip install "grpcio-tools==1.66.2"
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.6
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install web dependencies
+        working-directory: services/web
+        run: npm ci
+
+      - name: Validate proto stubs are up to date (python, go, typescript)
+        run: ./scripts/gen_proto.sh --check
+
+      - name: Python syntax check
+        run: python -m py_compile services/api/app/*.py
+
+      - name: Go build and vet
+        working-directory: services/go-ui
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: Astro build (SSR)
+        working-directory: services/web
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # 2. Build and push all three images. A single tagging scheme keeps the three
+  #    revisions traceable to one commit.
+  # ---------------------------------------------------------------------------
+  images:
+    name: Build and push images
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.refs.outputs.python }}
+      web: ${{ steps.refs.outputs.web }}
+      go: ${{ steps.refs.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build python-backend
+        id: python
+        uses: docker/build-push-action@v6
+        with:
+          context: services/api
+          push: true
+          tags: |
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/python-backend:${{ github.sha }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/python-backend:latest
+          cache-from: type=gha,scope=python
+          cache-to: type=gha,mode=max,scope=python
+          provenance: false
+
+      - name: Build astro-webui
+        id: web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/web/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/astro-webui:${{ github.sha }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/astro-webui:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+          provenance: false
+
+      - name: Build go-webui
+        id: go
+        uses: docker/build-push-action@v6
+        with:
+          context: services/go-ui
+          push: true
+          tags: |
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/go-webui:${{ github.sha }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/go-webui:latest
+          cache-from: type=gha,scope=go
+          cache-to: type=gha,mode=max,scope=go
+          provenance: false
+
+      - name: Resolve immutable image references
+        id: refs
+        run: |
+          set -euo pipefail
+          base="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}"
+          echo "python=${base}/python-backend@${{ steps.python.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          echo "web=${base}/astro-webui@${{ steps.web.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          echo "go=${base}/go-webui@${{ steps.go.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # 3. Terraform: plan then apply. All three revisions move atomically because a
+  #    single apply owns every service.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Terraform apply
+    needs: images
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "0"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ vars.GCP_REGION }}
+      TF_VAR_python_image: ${{ needs.images.outputs.python }}
+      TF_VAR_web_image: ${{ needs.images.outputs.web }}
+      TF_VAR_go_image: ${{ needs.images.outputs.go }}
+      TF_VAR_web_domain: ${{ vars.WEB_DOMAIN }}
+      TF_VAR_index_domain: ${{ vars.INDEX_DOMAIN }}
+      TF_VAR_mongodb_uri: ${{ secrets.MONGODB_URI }}
+      TF_VAR_qdrant_url: ${{ secrets.QDRANT_URL }}
+      TF_VAR_qdrant_api_key: ${{ secrets.QDRANT_API_KEY }}
+      TF_VAR_bot_ingest_api_key: ${{ secrets.BOT_INGEST_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform init (GCS remote state)
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=lirify/state"
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform plan
+        run: |
+          terraform plan -input=false -out=tfplan \
+            -var "enable_domain_mappings=${{ (inputs.enable_domain_mappings && 'true') || (vars.ENABLE_DOMAIN_MAPPINGS || 'false') }}"
+
+      - name: Terraform apply
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Publish outputs
+        run: |
+          {
+            echo "### Lirify deploy"
+            terraform output -raw python_backend_url | xargs -I{} echo "- python-backend: {}"
+            terraform output -raw astro_webui_url | xargs -I{} echo "- astro-webui: {}"
+            terraform output -raw go_webui_url | xargs -I{} echo "- go-webui: {}"
+            terraform output -json web_domain_dns_records | xargs -I{} echo "- web DNS: {}"
+            terraform output -json index_domain_dns_records | xargs -I{} echo "- index DNS: {}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 4. Post-deploy smoke test against the *.run.app URLs (no DNS needed).
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: Smoke test
+    needs: [images, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Check all three services
+        run: |
+          set -euo pipefail
+          api=$(gcloud run services describe "$SERVICE_PYTHON" --region "$REGION" --format='value(status.url)')
+          web=$(gcloud run services describe "$SERVICE_WEB" --region "$REGION" --format='value(status.url)')
+          index=$(gcloud run services describe "$SERVICE_GO" --region "$REGION" --format='value(status.url)')
+          for pair in "python:$api/health" "web:$web/healthz" "index:$index/healthz"; do
+            name="${pair%%:*}"; url="${pair#*:}"
+            for attempt in $(seq 1 20); do
+              code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 20 "$url" || true)
+              if [ "$code" = "200" ]; then
+                echo "$name OK: $(head -c 200 /tmp/body)"
+                break
+              fi
+              echo "$name waiting ($code, attempt $attempt)"
+              sleep 10
+            done
+            if [ "$code" != "200" ]; then
+              echo "$name failed: $code" >&2
+              exit 1
+            fi
+          done

@@ -1,0 +1,26 @@
+# --- local state / build output -------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+dist/
+.astro/
+services/go-ui/go-ui
+*.log
+
+# --- terraform -------------------------------------------------------------
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+terraform.tfvars
+crash.log
+
+# --- local env -------------------------------------------------------------
+.env
+.env.local
+
+# Keep the dependency lock files and generated contracts committed:
+!infra/.terraform.lock.hcl
+!infra/bootstrap/.terraform.lock.hcl

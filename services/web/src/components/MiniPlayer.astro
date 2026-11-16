@@ -1,0 +1,30 @@
+---
+import Icon from "./Icon.astro";
+---
+
+<aside class="mini-player" id="mini-player" aria-label="Mini player">
+  <div class="mini-main">
+    <div class="mini-art">
+      <img id="mini-art" alt="" hidden />
+      <div class="art-fallback" id="mini-art-fallback">
+        <Icon name="music" size={18} />
+      </div>
+    </div>
+    <div class="mini-meta">
+      <b id="mini-title">Nothing playing</b>
+      <span id="mini-artist">—</span>
+    </div>
+    <div class="mini-actions">
+      <button class="icon-btn tiny" id="mini-play" aria-label="Play">
+        <Icon name="play" size={16} />
+      </button>
+      <button class="icon-btn tiny" id="mini-next" aria-label="Next track">
+        <Icon name="skip-forward" size={16} />
+      </button>
+      <button class="icon-btn tiny" id="mini-expand" aria-label="Restore player">
+        <Icon name="expand" size={15} />
+      </button>
+    </div>
+  </div>
+  <div class="mini-progress"><i id="mini-progress-fill"></i></div>
+</aside>

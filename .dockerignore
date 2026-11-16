@@ -1,0 +1,14 @@
+.git
+.github
+data
+infra
+docs
+skills
+**/node_modules
+**/dist
+**/.astro
+**/__pycache__
+**/*.pyc
+services/go-ui/go-ui
+*.log
+.env

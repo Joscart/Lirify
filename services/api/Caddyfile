@@ -1,0 +1,36 @@
+# Single-port front door for python-backend on Cloud Run.
+#
+# Cloud Run terminates TLS and forwards cleartext HTTP/2 (h2c) to PORT. One
+# container therefore serves two protocols on one port:
+#
+#   Content-Type: application/grpc*  -> grpc.aio  (127.0.0.1:50051, h2c upstream)
+#   everything else                  -> uvicorn   (127.0.0.1:8000, REST/JSON + /ws)
+#
+# That is what lets one Cloud Run service carry gRPC for both web UIs and the
+# bearer-protected bot ingestion API without a second billable service.
+
+{
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2 h2c
+	}
+}
+
+:{$PORT:8080} {
+	@grpc header Content-Type application/grpc*
+	handle @grpc {
+		reverse_proxy h2c://127.0.0.1:{$GRPC_PORT:50051} {
+			transport http {
+				versions h2c
+			}
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:{$HTTP_PORT:8000} {
+			flush_interval -1
+		}
+	}
+}

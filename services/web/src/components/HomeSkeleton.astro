@@ -1,0 +1,66 @@
+---
+import Icon from "./Icon.astro";
+---
+
+<div class="home-skeleton" aria-busy="true" aria-label="Loading your library">
+  <div class="page-head">
+    <div>
+      <h1>Your library</h1>
+      <p>Reading the index and warming up the shelves…</p>
+    </div>
+  </div>
+
+  <div class="hero">
+    <div class="hero-art skeleton"></div>
+    <div class="hero-body">
+      <div class="skeleton" style="width:130px;height:11px"></div>
+      <div class="skeleton" style="width:min(560px,80%);height:52px;border-radius:12px"></div>
+      <div class="skeleton" style="width:210px;height:14px"></div>
+      <div class="skeleton" style="width:320px;height:11px"></div>
+      <div class="hero-actions">
+        <span class="btn btn-primary" style="opacity:.55"><Icon name="play" size={16} /> Play</span>
+        <span class="btn btn-outline" style="opacity:.55"><Icon name="radio" size={16} /> Start radio</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="chips">
+    {["All", "English", "日本語", "Español"].map((name) => (
+      <span class="chip skeleton" style="width:84px;height:30px;border:0">{name}</span>
+    ))}
+  </div>
+
+  <section class="shelf">
+    <div class="shelf-head">
+      <div class="shelf-title">
+        <h2>Fresh in the index</h2>
+      </div>
+    </div>
+    <div class="shelf-row">
+      {Array.from({ length: 8 }).map(() => (
+        <div class="skeleton-card">
+          <div class="art skeleton"></div>
+          <div class="line skeleton"></div>
+          <div class="line short skeleton"></div>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="shelf">
+    <div class="shelf-head">
+      <div class="shelf-title">
+        <h2>Made for you</h2>
+      </div>
+    </div>
+    <div class="shelf-row">
+      {Array.from({ length: 8 }).map(() => (
+        <div class="skeleton-card">
+          <div class="art skeleton"></div>
+          <div class="line skeleton"></div>
+          <div class="line short skeleton"></div>
+        </div>
+      ))}
+    </div>
+  </section>
+</div>

@@ -1,0 +1,132 @@
+---
+import Icon from "./Icon.astro";
+---
+
+<div hidden aria-hidden="true">
+  <template id="tpl-track-card">
+    <article class="card" data-track-card>
+      <div class="card-art">
+        <img data-el="art" alt="" loading="lazy" decoding="async" hidden />
+        <div class="art-fallback" data-el="fallback"><Icon name="music" size={34} /></div>
+        <span class="card-tag" data-el="tag" hidden></span>
+        <span class="card-duration" data-el="duration" hidden></span>
+        <button class="card-menu" data-action="menu" aria-label="More options"><Icon name="more" size={16} /></button>
+        <button class="card-play" data-action="play" aria-label="Play"><Icon name="play" size={18} /></button>
+      </div>
+      <div class="card-info">
+        <div class="card-title" data-el="title"></div>
+        <div class="card-meta">
+          <span class="artist" data-el="artist"></span>
+          <span class="dot"></span>
+          <span class="lang" data-el="lang"></span>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-video-card">
+    <article class="card is-video" data-track-card>
+      <div class="card-art">
+        <img data-el="art" alt="" loading="lazy" decoding="async" hidden />
+        <div class="art-fallback" data-el="fallback"><Icon name="video" size={30} /></div>
+        <span class="card-tag" data-el="tag">MV</span>
+        <span class="card-duration" data-el="duration" hidden></span>
+        <button class="card-menu" data-action="menu" aria-label="More options"><Icon name="more" size={16} /></button>
+        <button class="card-play" data-action="playvideo" aria-label="Watch video"><Icon name="play" size={18} /></button>
+      </div>
+      <div class="card-info">
+        <div class="card-title" data-el="title"></div>
+        <div class="card-meta">
+          <span class="artist" data-el="artist"></span>
+          <span class="dot"></span>
+          <span class="lang" data-el="lang"></span>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-artist-card">
+    <article class="card is-round" data-artist-card>
+      <div class="card-art">
+        <img data-el="art" alt="" loading="lazy" decoding="async" hidden />
+        <div class="art-fallback" data-el="fallback"><Icon name="headphones" size={30} /></div>
+        <button class="card-play" data-action="artist" aria-label="Play artist"><Icon name="play" size={18} /></button>
+      </div>
+      <div class="card-info">
+        <div class="card-title" data-el="title"></div>
+        <div class="card-meta"><span class="artist" data-el="meta"></span></div>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-playlist-card">
+    <article class="card" data-playlist-card>
+      <div class="card-art">
+        <div class="mosaic" data-el="mosaic" data-count="0"></div>
+        <div class="art-fallback" data-el="fallback"><Icon name="list" size={30} /></div>
+        <span class="card-tag" data-el="tag" hidden></span>
+        <button class="card-menu" data-action="plmenu" aria-label="More options"><Icon name="more" size={16} /></button>
+        <button class="card-play" data-action="playlist" aria-label="Play playlist"><Icon name="play" size={18} /></button>
+      </div>
+      <div class="card-info">
+        <div class="card-title" data-el="title"></div>
+        <div class="card-meta"><span class="artist" data-el="meta"></span></div>
+      </div>
+    </article>
+  </template>
+
+  <template id="tpl-track-row">
+    <div class="track-row" data-track-row>
+      <div class="track-index" data-action="play" role="button" tabindex="-1" aria-label="Play">
+        <span class="num" data-el="index"></span>
+        <span class="row-play"><Icon name="play" size={13} /></span>
+        <span class="eq"><i></i><i></i><i></i></span>
+      </div>
+      <div class="track-main">
+        <div class="track-thumb">
+          <img data-el="art" alt="" loading="lazy" decoding="async" hidden />
+        </div>
+        <div class="track-text">
+          <div class="track-title" data-el="title" data-action="play" role="button" tabindex="-1"></div>
+          <div class="track-artist">
+            <a class="artist-link" data-el="artist" data-action="artist" href="#/"></a>
+            <span class="dot"></span>
+            <span class="src" data-el="src"></span>
+          </div>
+        </div>
+      </div>
+      <div class="track-lang" data-el="lang"></div>
+      <div class="track-duration" data-el="duration"></div>
+      <div class="track-actions">
+        <button class="icon-btn tiny" data-action="like" aria-label="Like">
+          <Icon name="heart" size={15} />
+        </button>
+        <button class="icon-btn tiny" data-action="menu" aria-label="More options">
+          <Icon name="more" size={15} />
+        </button>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-result-row">
+    <div class="result-row" data-result-row>
+      <span class="index" data-el="index"></span>
+      <img data-el="art" alt="" loading="lazy" decoding="async" hidden />
+      <div class="meta">
+        <b data-el="title" data-action="play"></b>
+        <div class="sub">
+          <a data-el="artist" data-action="artist" href="#/"></a>
+          <span class="dot"></span>
+          <span data-el="lang"></span>
+          <span class="dot"></span>
+          <span data-el="src"></span>
+        </div>
+        <div class="snippet" data-el="snippet" hidden></div>
+      </div>
+      <span class="match" data-el="match" hidden></span>
+      <button class="icon-btn tiny" data-action="menu" aria-label="More options">
+        <Icon name="more" size={15} />
+      </button>
+    </div>
+  </template>
+</div>
