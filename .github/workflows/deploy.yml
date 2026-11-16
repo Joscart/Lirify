@@ -273,49 +273,6 @@ jobs:
         with:
           terraform_version: "1.9.8"
 
-      # Cloud Run refuses to create a domain mapping for a domain the project
-      # owner has not verified; without this the whole apply fails with a generic
-      # provider error after several minutes.
-      - name: Domain mapping preflight
-        if: ${{ (inputs.enable_domain_mappings && 'true') || (vars.ENABLE_DOMAIN_MAPPINGS || 'false') == 'true' }}
-        env:
-          WEB_DOMAIN: ${{ vars.WEB_DOMAIN }}
-          INDEX_DOMAIN: ${{ vars.INDEX_DOMAIN }}
-        run: |
-          set -euo pipefail
-          verified=$(gcloud domains list-user-verified --format='value(domain)' 2>/dev/null || true)
-          echo "verified domains for this account:"
-          printf '  %s\n' ${verified:-"(none)"}
-
-          covered() {
-            host="$1"
-            for domain in $verified; do
-              case "$host" in "$domain"|*."$domain") return 0;; esac
-            done
-            return 1
-          }
-
-          missing=0
-          for host in "$WEB_DOMAIN" "$INDEX_DOMAIN"; do
-            if covered "$host"; then
-              echo "OK  $host"
-            else
-              echo "::error title=domain not verified::$host is not covered by a verified domain (verified: ${verified:-none})"
-              missing=1
-            fi
-          done
-          if [ "$missing" = "1" ]; then
-            echo
-            echo "Verify the registrable domain once, then re-run:"
-            echo "  gcloud domains verify joscart.win"
-            echo "It prints a TXT record (google-site-verification=...) to add at"
-            echo "Cloudflare (DNS only, not proxied). Subdomains are then covered."
-            echo
-            echo "The zone must exist first: joscart.win is registered with"
-            echo "bob/maleah.ns.cloudflare.com but currently publishes no records."
-            exit 1
-          fi
-
       - name: Terraform init (GCS remote state)
         run: |
           terraform init \
