@@ -350,24 +350,36 @@ jobs:
 
       - name: Check all three services
         run: |
-          set -euo pipefail
+          set -uo pipefail
+
           api=$(gcloud run services describe "$SERVICE_PYTHON" --region "$REGION" --format='value(status.url)')
           web=$(gcloud run services describe "$SERVICE_WEB" --region "$REGION" --format='value(status.url)')
           index=$(gcloud run services describe "$SERVICE_GO" --region "$REGION" --format='value(status.url)')
-          # index/readyz proves go-webui -> python-backend gRPC over cloud TLS.
-          for pair in "python:$api/health" "web:$web/healthz" "index:$index/healthz" "index-grpc:$index/readyz"; do
-            name="${pair%%:*}"; url="${pair#*:}"
-            for attempt in $(seq 1 20); do
-              code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 20 "$url" || true)
+          echo "python-backend: $api"
+          echo "astro-webui   : $web"
+          echo "go-webui      : $index"
+
+          fail=0
+          check() {
+            name="$1"
+            url="$2"
+            body=$(mktemp)
+            code=""
+            for attempt in $(seq 1 24); do
+              code=$(curl -s -o "$body" -w '%{http_code}' --max-time 20 "$url" || true)
               if [ "$code" = "200" ]; then
-                echo "$name OK: $(head -c 200 /tmp/body)"
-                break
+                echo "::notice title=smoke:$name::$url -> 200 $(head -c 160 "$body")"
+                return 0
               fi
-              echo "$name waiting ($code, attempt $attempt)"
+              echo "$name waiting (http=$code, attempt $attempt) $(head -c 160 "$body" 2>/dev/null)"
               sleep 10
             done
-            if [ "$code" != "200" ]; then
-              echo "$name failed: $code" >&2
-              exit 1
-            fi
-          done
+            echo "::error title=smoke:$name failed::HTTP '$code' from $url — $(head -c 500 "$body" 2>/dev/null)"
+            return 1
+          }
+
+          check python            "$api/health"   || fail=1
+          check web               "$web/healthz"  || fail=1
+          check index             "$index/healthz" || fail=1
+          check "index->python"   "$index/readyz" || fail=1
+          exit "$fail"
