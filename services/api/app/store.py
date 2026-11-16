@@ -228,6 +228,7 @@ class Store:
 
 class MongoStore(Store):
     backend = "mongodb"
+    init_error = ""
 
     def __init__(self, uri: str, db_name: str = "lirify") -> None:
         from pymongo import ASCENDING, DESCENDING, MongoClient
@@ -253,7 +254,14 @@ class MongoStore(Store):
         )
         self.db = self.client[db_name]
         self._collection_invalid = CollectionInvalid
-        self.ensure_schema()
+        # A wrong URI/password or an Atlas IP allowlist must degrade this process,
+        # not kill it: an exception here would abort module import and leave Cloud
+        # Run with a container that answers 502 forever.
+        try:
+            self.ensure_schema()
+        except Exception as exc:  # pragma: no cover - bad credentials / network
+            self.init_error = f"{type(exc).__name__}: {exc}"
+            print(f"[lirify] MongoDB init failed: {self.init_error}", flush=True)
 
     # -- schema -----------------------------------------------------------
     def ensure_schema(self) -> None:
@@ -649,6 +657,7 @@ class MongoStore(Store):
 
 class MemoryStore(Store):
     backend = "memory"
+    init_error = ""
 
     def __init__(self) -> None:
         self._songs: Dict[str, Dict[str, Any]] = {}
@@ -832,7 +841,20 @@ def get_store() -> Store:
         # Derive the database from the URI path, exactly like a Mongoose client.
         path = re.sub(r"^mongodb(?:\+srv)?://[^/]+/?", "", uri).split("?")[0]
         db_name = path or "lirify"
-    _STORE = MongoStore(uri, db_name)
+    try:
+        _STORE = MongoStore(uri, db_name)
+    except Exception as exc:  # pragma: no cover - DNS/auth/project problems
+        # A bad URI must not stop the container: running degraded (empty index) is
+        # recoverable and visible in /health, a crash loop is neither.
+        message = f"{type(exc).__name__}: {exc}"
+        print(
+            f"[lirify] MongoDB unavailable ({redact_uri(uri)}): {message}. "
+            "Serving with an empty in-memory index.",
+            flush=True,
+        )
+        fallback = MemoryStore()
+        fallback.init_error = message
+        _STORE = fallback
     return _STORE
 
 

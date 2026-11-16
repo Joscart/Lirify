@@ -61,6 +61,7 @@ COMMIT_LOCK = asyncio.Lock()
 WORKERS: List[asyncio.Task] = []
 GRPC_SERVER = None
 GRPC_ERROR = ""
+MONGO_ERROR = ""
 
 app = FastAPI(title="Lirify API", version="1.0.0")
 app.add_middleware(
@@ -595,6 +596,8 @@ def load_state() -> None:
     try:
         stored = STORE.load_songs(limit=load_limit)
     except Exception as exc:  # pragma: no cover - Atlas unreachable
+        global MONGO_ERROR
+        MONGO_ERROR = f"{type(exc).__name__}: {exc}"
         print(f"[lirify] could not load songs from {STORE.backend}: {exc}", flush=True)
         return
     try:
@@ -1510,6 +1513,8 @@ def health():
         "status": "ok",
         "indexed_songs": len(STATE["songs"]),
         "storage": {"tracks": STORE.backend, "vectors": VECTORS.backend},
+        "mongo": "down" if (MONGO_ERROR or getattr(STORE, "init_error", "")) else "up",
+        "mongo_error": MONGO_ERROR or getattr(STORE, "init_error", ""),
         # Surfaced so operators (and CI annotations) can see a broken gRPC
         # listener without reading container logs.
         "grpc": "up" if GRPC_SERVER is not None else "down",
