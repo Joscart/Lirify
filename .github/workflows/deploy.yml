@@ -109,6 +109,9 @@ jobs:
   preflight:
     name: Preflight configuration
     runs-on: ubuntu-latest
+    # Reads repository AND environment-scoped variables/secrets, so it must
+    # declare the same environment as the jobs it gates.
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}
     steps:
       - name: Check repository variables and secrets
         env:
@@ -137,7 +140,15 @@ jobs:
             echo "::error::Missing GitHub configuration for this repository"
             printf '  - %s\n' "${missing[@]}"
             echo
-            echo "Set them with scripts/setup-github.sh (values in infra/BOOTSTRAP.md)."
+            echo "Configured at the WRONG LEVEL? Variables and secrets stored on an"
+            echo "environment are only visible to jobs that declare it. This workflow"
+            echo "uses '${{ vars.DEPLOY_ENVIRONMENT || 'production' }}'."
+            echo "  repository level : gh variable set NAME --body VALUE"
+            echo "  environment level: gh variable set NAME --env production --body VALUE"
+            echo "  list what exists : gh variable list / gh secret list [--env production]"
+            echo
+            echo "Set everything with scripts/setup-github.sh --env production"
+            echo "(values in infra/BOOTSTRAP.md)."
             exit 1
           fi
           echo "All required variables and secrets are present."
@@ -150,6 +161,7 @@ jobs:
     name: Build and push images
     needs: [verify, preflight]
     runs-on: ubuntu-latest
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}
     outputs:
       python: ${{ steps.refs.outputs.python }}
       web: ${{ steps.refs.outputs.web }}
@@ -228,7 +240,7 @@ jobs:
     name: Terraform apply
     needs: [images, preflight]
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}
     defaults:
       run:
         working-directory: infra
@@ -295,6 +307,7 @@ jobs:
     name: Smoke test
     needs: [images, deploy]
     runs-on: ubuntu-latest
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'production' }}
     steps:
       - id: auth
         uses: google-github-actions/auth@v2

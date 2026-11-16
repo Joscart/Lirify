@@ -122,6 +122,11 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   expected to continue with a warning.
 - Legacy JSON can be loaded into the configured database with
   `scripts/migrate_json_to_mongo.py` (idempotent upserts, matrices excluded).
+- GitHub-wise: variables/secrets on an *environment* are invisible to jobs that
+  do not declare it. All configuration-consuming jobs declare
+  `production` (override with a repository variable `DEPLOY_ENVIRONMENT`).
+  A preflight failure that lists every variable/secret is a level mismatch, not
+  an empty config — check with `scripts/setup-github.sh --check`.
 - After editing Python code, `docker compose up -d api` is not enough: run
   `docker compose build api && docker compose up -d api` (images are not mounted).
 - README and this file must stay in sync with `main.py`, `store.py` and the proto.
