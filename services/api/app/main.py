@@ -60,6 +60,7 @@ MATRIX_QUEUE: asyncio.Queue = asyncio.Queue()
 COMMIT_LOCK = asyncio.Lock()
 WORKERS: List[asyncio.Task] = []
 GRPC_SERVER = None
+GRPC_ERROR = ""
 
 app = FastAPI(title="Lirify API", version="1.0.0")
 app.add_middleware(
@@ -1387,12 +1388,14 @@ async def start_workers() -> None:
         # One process = one index. The Caddy mux still fronts both protocols.
         # A failure here must not take REST down with it: report it and keep the
         # HTTP surface (and /health) alive.
+        global GRPC_ERROR
         try:
             import grpc_server
 
             GRPC_SERVER = await grpc_server.start_server()
         except Exception as exc:  # pragma: no cover - port/bind problems
-            print(f"[lirify] gRPC server failed to start: {exc}", flush=True)
+            GRPC_ERROR = f"{type(exc).__name__}: {exc}"
+            print(f"[lirify] gRPC server failed to start: {GRPC_ERROR}", flush=True)
     if not WORKERS:
         await recover_queue()
         WORKERS.append(asyncio.create_task(reconcile_vectors()))
@@ -1507,6 +1510,10 @@ def health():
         "status": "ok",
         "indexed_songs": len(STATE["songs"]),
         "storage": {"tracks": STORE.backend, "vectors": VECTORS.backend},
+        # Surfaced so operators (and CI annotations) can see a broken gRPC
+        # listener without reading container logs.
+        "grpc": "up" if GRPC_SERVER is not None else "down",
+        "grpc_error": GRPC_ERROR,
     }
 
 
