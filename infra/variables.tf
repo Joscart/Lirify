@@ -181,6 +181,12 @@ variable "bot_check_retry_max_seconds" {
   default     = 7200
 }
 
+variable "app_version" {
+  description = "Commit SHA reported by /health (set by CI)."
+  type        = string
+  default     = "dev"
+}
+
 variable "index_refresh_seconds" {
   description = "How often a running instance compares the shared index revision and reloads. 0 disables."
   type        = number

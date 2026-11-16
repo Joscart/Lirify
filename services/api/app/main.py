@@ -1558,6 +1558,10 @@ def health():
         # listener without reading container logs.
         "grpc": "up" if GRPC_SERVER is not None else "down",
         "grpc_error": GRPC_ERROR,
+        # Deployment identity: lets an operator confirm which image is live and
+        # which index revision this replica is serving.
+        "version": os.environ.get("APP_VERSION", "dev"),
+        "revision": STATE_REV,
     }
 
 

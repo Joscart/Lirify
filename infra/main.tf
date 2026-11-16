@@ -198,6 +198,10 @@ resource "google_cloud_run_v2_service" "python" {
       # Instances poll the shared index revision so a batch committed elsewhere
       # (local compose, another replica) becomes visible without a restart.
       env {
+        name  = "APP_VERSION"
+        value = var.app_version
+      }
+      env {
         name  = "INDEX_REFRESH_SECONDS"
         value = tostring(var.index_refresh_seconds)
       }

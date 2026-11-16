@@ -249,6 +249,7 @@ jobs:
       TF_INPUT: "0"
       TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
       TF_VAR_region: ${{ vars.GCP_REGION }}
+      TF_VAR_app_version: ${{ github.sha }}
       TF_VAR_python_image: ${{ needs.images.outputs.python }}
       TF_VAR_web_image: ${{ needs.images.outputs.web }}
       TF_VAR_go_image: ${{ needs.images.outputs.go }}
