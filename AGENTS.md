@@ -145,6 +145,8 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   `templates/index.html` and `hub.go` together when adding events.
 - Astro is now `output: "server"` (node adapter). Static-only assumptions
   (`npm run preview`) no longer apply; use `npm run build && npm start`.
+- Cloud Run reserves `PORT` (and the `K_*`/`CLOUD_RUN_*` names): never declare
+  them in `infra/main.tf`. The images default to 8080 and read the injected value.
 - Free-tier deployment targets `us-central1`/`us-east1`, `min=0`, `max=1`.
   Raising `max_instances` or memory breaks the always-free assumption.
 - YouTube anti-bot challenges are terminal for the server by design; retries are

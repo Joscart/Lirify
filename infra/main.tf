@@ -141,10 +141,8 @@ resource "google_cloud_run_v2_service" "python" {
         }
       }
 
-      env {
-        name  = "PORT"
-        value = "8080"
-      }
+      # PORT is injected by Cloud Run (reserved name); the image defaults to 8080
+      # and run.sh honours the injected value.
       env {
         name  = "GRPC_PORT"
         value = "50051"
@@ -310,10 +308,6 @@ resource "google_cloud_run_v2_service" "web" {
         value = "0.0.0.0"
       }
       env {
-        name  = "PORT"
-        value = "8080"
-      }
-      env {
         name  = "PROTO_PATH"
         value = "/app/proto/lirify.proto"
       }
@@ -392,10 +386,6 @@ resource "google_cloud_run_v2_service" "go" {
         }
       }
 
-      env {
-        name  = "PORT"
-        value = "8080"
-      }
       env {
         name  = "GRPC_TARGET"
         value = "${trimprefix(google_cloud_run_v2_service.python.uri, "https://")}:443"
