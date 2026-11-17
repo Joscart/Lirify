@@ -187,6 +187,12 @@ variable "app_version" {
   default     = "dev"
 }
 
+variable "index_check_seconds" {
+  description = "Per-request window for comparing the shared index revision (Cloud Run freezes background tasks between requests)."
+  type        = number
+  default     = 10
+}
+
 variable "index_refresh_seconds" {
   description = "How often a running instance compares the shared index revision and reloads. 0 disables."
   type        = number

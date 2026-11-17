@@ -205,6 +205,10 @@ resource "google_cloud_run_v2_service" "python" {
         name  = "INDEX_REFRESH_SECONDS"
         value = tostring(var.index_refresh_seconds)
       }
+      env {
+        name  = "INDEX_CHECK_SECONDS"
+        value = tostring(var.index_check_seconds)
+      }
 
       env {
         name = "MONGODB_URI"
