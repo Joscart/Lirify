@@ -21,8 +21,8 @@ export GCP_REGION=us-central1
 export GCP_WORKLOAD_IDENTITY_PROVIDER=projects/474677577871/locations/global/workloadIdentityPools/github-pool/providers/github-provider
 export GCP_DEPLOY_SERVICE_ACCOUNT=lirify-deployer@lirify-514907.iam.gserviceaccount.com
 export TF_STATE_BUCKET=lirify-514907-lirify-tfstate
-export WEB_DOMAIN=lirify.joscart.win
-export INDEX_DOMAIN=index.joscart.win
+# Domains are defined in infra/variables.tf (lirify.joscart.win / index.joscart.win)
+# and are deliberately not overridden by CI.
 export ENABLE_DOMAIN_MAPPINGS=false
 
 ./scripts/setup-github.sh            # variables + secret presence check

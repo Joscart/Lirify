@@ -120,8 +120,6 @@ jobs:
           GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-          WEB_DOMAIN: ${{ vars.WEB_DOMAIN }}
-          INDEX_DOMAIN: ${{ vars.INDEX_DOMAIN }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
@@ -130,7 +128,7 @@ jobs:
           set -euo pipefail
           missing=()
           for name in GCP_PROJECT_ID GCP_REGION GCP_WORKLOAD_IDENTITY_PROVIDER \
-                      GCP_DEPLOY_SERVICE_ACCOUNT TF_STATE_BUCKET WEB_DOMAIN INDEX_DOMAIN; do
+                      GCP_DEPLOY_SERVICE_ACCOUNT TF_STATE_BUCKET; do
             [ -n "${!name:-}" ] || missing+=("variable:$name")
           done
           for name in MONGODB_URI QDRANT_URL QDRANT_API_KEY BOT_INGEST_API_KEY; do
@@ -253,8 +251,6 @@ jobs:
       TF_VAR_python_image: ${{ needs.images.outputs.python }}
       TF_VAR_web_image: ${{ needs.images.outputs.web }}
       TF_VAR_go_image: ${{ needs.images.outputs.go }}
-      TF_VAR_web_domain: ${{ vars.WEB_DOMAIN }}
-      TF_VAR_index_domain: ${{ vars.INDEX_DOMAIN }}
       TF_VAR_mongodb_uri: ${{ secrets.MONGODB_URI }}
       TF_VAR_qdrant_url: ${{ secrets.QDRANT_URL }}
       TF_VAR_qdrant_api_key: ${{ secrets.QDRANT_API_KEY }}

@@ -163,8 +163,7 @@ This value is the bearer token AI agents use. It is stored in Secret Manager as
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | output from step 2 |
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | output from step 2 |
 | `TF_STATE_BUCKET` | output from step 2 |
-| `WEB_DOMAIN` | `lirify.joscart.win` |
-| `INDEX_DOMAIN` | `index.joscart.win` |
+| ~~`WEB_DOMAIN`~~ / ~~`INDEX_DOMAIN`~~ | no longer used: the domains are defined in `infra/variables.tf` so a stale variable cannot rename (and destroy) a domain mapping. Delete them if present. |
 | `ENABLE_DOMAIN_MAPPINGS` | `false` until step 9 is done, then `true` |
 | `GCP_PROJECT_ID` | `lirify-514907` |
 

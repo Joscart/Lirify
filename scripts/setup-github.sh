@@ -9,8 +9,6 @@
 #   export GCP_WORKLOAD_IDENTITY_PROVIDER=projects/.../providers/github-provider
 #   export GCP_DEPLOY_SERVICE_ACCOUNT=lirify-deployer@lirify-514907.iam.gserviceaccount.com
 #   export TF_STATE_BUCKET=lirify-514907-lirify-tfstate
-#   export WEB_DOMAIN=lirify.joscart.win
-#   export INDEX_DOMAIN=index.joscart.win
 #   export ENABLE_DOMAIN_MAPPINGS=false
 #   export MONGODB_URI=... QDRANT_URL=... QDRANT_API_KEY=... BOT_INGEST_API_KEY=...
 #   ./scripts/setup-github.sh [--repo owner/name] [--env Lirify] [--check]
@@ -68,8 +66,6 @@ VARIABLES=(
   GCP_WORKLOAD_IDENTITY_PROVIDER
   GCP_DEPLOY_SERVICE_ACCOUNT
   TF_STATE_BUCKET
-  WEB_DOMAIN
-  INDEX_DOMAIN
   ENABLE_DOMAIN_MAPPINGS
 )
 
