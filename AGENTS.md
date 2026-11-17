@@ -160,6 +160,10 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   (`npm run preview`) no longer apply; use `npm run build && npm start`.
 - Cloud Run reserves `PORT` (and the `K_*`/`CLOUD_RUN_*` names): never declare
   them in `infra/main.tf`. The images default to 8080 and read the injected value.
+- Terraform state lives in GCS with a lock: never `terraform apply` locally while
+  a CI deploy is running (the CI job fails with `Error 412 ... tflock`). If a
+  local apply is unavoidable, wait for the run to finish; the next CI run
+  restores the pinned image digests and `APP_VERSION`.
 - The index host is `index.joscart.win`, not a sub-subdomain: both custom hosts
   must be direct children of the verified apex, otherwise certificate validation
   is unreliable.
