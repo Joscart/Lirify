@@ -6,7 +6,12 @@ CI cannot create for itself.
 
 Work top to bottom. Steps 1–6 are one-time. Steps 7–10 are the first deploy.
 
-> **Domains.** `lirify.joscart.win` (player) and `index.lirify.joscart.win`
+> **Domains.** Both hosts are direct children of the verified apex: `lirify.joscart.win`
+> (player) and `index.joscart.win` (indexer). Do not use `index.lirify.joscart.win`
+> (a sub-subdomain): it needs separate validation and has repeatedly failed
+> certificate provisioning, so the mapping was moved to `index.joscart.win`.
+>
+> `lirify.joscart.win` and `index.joscart.win`
 > (indexer) are the defaults in `infra/variables.tf`, `docker-compose.yml` and
 > `.env.example`. If you deploy to different hosts, change the GitHub variables
 > (`WEB_DOMAIN`, `INDEX_DOMAIN`) and the matching `TF_VAR_*` values together — a
@@ -159,7 +164,7 @@ This value is the bearer token AI agents use. It is stored in Secret Manager as
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | output from step 2 |
 | `TF_STATE_BUCKET` | output from step 2 |
 | `WEB_DOMAIN` | `lirify.joscart.win` |
-| `INDEX_DOMAIN` | `index.lirify.joscart.win` |
+| `INDEX_DOMAIN` | `index.joscart.win` |
 | `ENABLE_DOMAIN_MAPPINGS` | `false` until step 9 is done, then `true` |
 | `GCP_PROJECT_ID` | `lirify-514907` |
 
@@ -270,6 +275,7 @@ Order matters:
    ```
 
    Typical result: a `CNAME` per subdomain pointing at `ghs.googlehosted.com.`
+   Add them as **CNAME** records (not A records) with the proxy **off**.
 5. **Add them at Cloudflare as DNS only.** The orange-cloud proxy must be off for
    these records: a proxied CNAME terminates TLS at Cloudflare, so Google cannot
    validate the domain and the managed certificate never issues.
@@ -299,7 +305,7 @@ The services keep using their `*.run.app` URLs for server-to-server traffic
 | Re-deploy the same commit | Actions → Deploy → Run workflow. |
 | Rotate the bot key | Update the `BOT_INGEST_API_KEY` secret, re-run the workflow (Terraform writes a new secret version and rolls the revision). |
 | Rotate the Atlas password | Update `MONGODB_URI`, re-run. |
-| Index a playlist as an operator | `https://index.lirify.joscart.win` → **Index now**. |
+| Index a playlist as an operator | `https://index.joscart.win` → **Index now**. |
 | Index a playlist as an agent | `skills/lirify-playlist-indexer` (see `SKILL.md`). |
 | Inspect job history | Go dashboard → Queue, or `curl $API/queue`. |
 | Change capacity | `MAX_INDEXED_SONGS` defaults to 3000 with `python_memory = 1Gi` (~400 MB at 1700 songs). Raise both together; `-1` = unlimited for local only. |

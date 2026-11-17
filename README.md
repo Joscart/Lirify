@@ -10,7 +10,7 @@ Cloud:
 | Service | URL | Stack |
 | --- | --- | --- |
 | `astro-webui` | https://lirify.joscart.win | Astro SSR player (gRPC client) |
-| `go-webui` | https://index.lirify.joscart.win | Go indexer dashboard (gRPC client) |
+| `go-webui` | https://index.joscart.win | Go indexer dashboard (gRPC client) |
 | `python-backend` | Cloud Run, private URL | FastAPI + gRPC (h2c) core engine |
 | AI agents | `POST /api/v1/bot/index-playlist` | bearer-protected ingestion API |
 

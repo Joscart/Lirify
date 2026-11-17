@@ -11,7 +11,7 @@ GitHub **repository variables** the deploy workflow needs.
 | `workload_identity_provider` | `projects/474677577871/locations/global/workloadIdentityPools/github-pool/providers/github-provider` | `GCP_WORKLOAD_IDENTITY_PROVIDER` |
 
 Project: `lirify-514907` · Project number: `474677577871` · Region: `us-central1`
-State prefix: `lirify/state` · Domain: `lirify.joscart.win` / `index.lirify.joscart.win`
+State prefix: `lirify/state` · Domain: `lirify.joscart.win` / `index.joscart.win`
 
 ## Set everything at once
 
@@ -22,7 +22,7 @@ export GCP_WORKLOAD_IDENTITY_PROVIDER=projects/474677577871/locations/global/wor
 export GCP_DEPLOY_SERVICE_ACCOUNT=lirify-deployer@lirify-514907.iam.gserviceaccount.com
 export TF_STATE_BUCKET=lirify-514907-lirify-tfstate
 export WEB_DOMAIN=lirify.joscart.win
-export INDEX_DOMAIN=index.lirify.joscart.win
+export INDEX_DOMAIN=index.joscart.win
 export ENABLE_DOMAIN_MAPPINGS=false
 
 ./scripts/setup-github.sh            # variables + secret presence check

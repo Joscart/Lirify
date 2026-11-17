@@ -54,7 +54,7 @@ variable "web_domain" {
 variable "index_domain" {
   description = "Public host for the Go playlist indexer dashboard."
   type        = string
-  default     = "index.lirify.joscart.win"
+  default     = "index.joscart.win"
 }
 
 variable "enable_domain_mappings" {
