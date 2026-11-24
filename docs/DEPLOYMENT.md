@@ -4,7 +4,15 @@ Everything in this file is the **manual** part of the pipeline. Code, Terraform 
 CI are in the repository; the steps below create the accounts and identities that
 CI cannot create for itself.
 
-Work top to bottom. Steps 1–6 are one-time. Steps 7–10 are the first deploy.
+Work top to bottom. Steps 1–6 are one-time. Steps 7–9 are the first deploy; step
+10 is the laptop indexing stack.
+
+> **Two stacks, one contract.** Cloud Run hosts only the three read-only serving
+> services (`python-backend` with `SERVE_ONLY=true`, `astro-webui`, `go-webui`
+> with `DASHBOARD_MODE=readonly`). Indexing and embedding run on the laptop
+> (`llama.cpp` + `local-indexer` + `local-ui`), which is the only writer of
+> Atlas/Qdrant. See `docs/ARCHITECTURE.md`.
+
 
 > **Domains.** Both hosts are direct children of the verified apex: `lirify.joscart.win`
 > (player) and `index.joscart.win` (indexer). Do not use `index.lirify.joscart.win`
@@ -124,9 +132,11 @@ holds the only record of these identities.
    `https://xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.eu-central.aws.cloud.qdrant.io:6333`.
    Keep the `:6333` port: the REST API is what the backend uses.
 4. Create an **API key** for the cluster and copy it.
-5. Nothing else to configure: the backend creates the `lirify_lyrics` collection
-   (256-dim, cosine) on first index, and backfills vectors for existing tracks if
-   the collection is ever empty.
+5. Nothing else to configure: `local-indexer` creates the
+   `lirify_lyrics_qwen3` collection (1024-dim, cosine) on first publish, and
+   backfills vectors for existing tracks. Keep `QDRANT_COLLECTION` identical on
+   the laptop and on Cloud Run; the old 256-dim `lirify_lyrics` collection is not
+   reused (an embedding-dimension change needs a new collection name).
 
 ---
 
@@ -175,9 +185,13 @@ This value is the bearer token AI agents use. It is stored in Secret Manager as
 | `QDRANT_URL` | Qdrant cluster URL from step 4 |
 | `QDRANT_API_KEY` | Qdrant API key from step 4 |
 | `BOT_INGEST_API_KEY` | token from step 5 |
-
 Optionally create a `production` environment (Settings → Environments) and add
 required reviewers if you want manual approval on deploys.
+
+> The bot key no longer enables indexing on Cloud Run: the ingestion router is
+> not mounted when `SERVE_ONLY=true`. It now authorises `POST /admin/reload`
+> (used after a local publish) and any HTTP bot surface you run yourself with
+> `SERVE_ONLY=false`.
 
 ### Workflow permissions
 
@@ -217,14 +231,23 @@ domains come next.
 ```bash
 API=$(gcloud run services describe lirify-api --region us-central1 --format='value(status.url)')
 
-curl -s "$API/health"                       # {"status":"ok","storage":{"tracks":"mongodb","vectors":"qdrant"}}
+curl -s "$API/health"                       # {"status":"ok","mode":"serve-only",...}
 curl -s "$API/stats" | head -c 400
 curl -s "$API/api/v1/bot/health" -H "Authorization: Bearer $BOT_INGEST_API_KEY"
+
+# The serving replica must refuse writes:
+curl -s -o /dev/null -w '%{http_code}\n' -X POST "$API/index" \
+  -H 'Content-Type: application/json' -d '{"url":"https://youtu.be/xxxxxxxxxxx"}'
+# 403
 
 # gRPC over TLS :443 (the same path the web UIs use)
 grpcurl -proto proto/lirify.proto \
   -H "x-lirify-client: runbook" \
   "$(echo "$API" | sed 's|https://||'):443" lirify.v1.LirifyService/GetIndexStats
+
+# The indexing RPC is UNIMPLEMENTED on Cloud Run:
+grpcurl -proto proto/lirify.proto -d '{"playlist_url":"https://youtu.be/xxxxxxxxxxx"}' \
+  "$(echo "$API" | sed 's|https://||'):443" lirify.v1.LirifyService/IndexPlaylist
 ```
 
 If `grpcurl` returns `Unknown` for an error response, confirm the service is the
@@ -296,18 +319,107 @@ The services keep using their `*.run.app` URLs for server-to-server traffic
 > NEG gives one IP, Cloud Armor and certificates with DNS authorization. Domain
 > mapping is used here because it is free and needs no load balancer.
 
-## 10. Day-2 operations
+## 10. Local indexing stack (laptop, RTX 2050 4 GB)
+
+Everything that mutates the index runs here. The cloud stack stays read-only.
+
+### 10.1 Hardware and driver prerequisites
+
+- NVIDIA driver + Container Toolkit (`nvidia-smi` works inside Docker).
+- The laptop's 4 GB RTX 2050 is shared with the compositor. Keep the llama.cpp
+  context small and do not run local-ui/model downloads during a game.
+
+### 10.2 Download the model and tokenizer once
+
+```bash
+scripts/local/fetch_qwen3_embedding.sh
+# -> models/qwen3-embedding/Qwen3-Embedding-0.6B-Q8_0.gguf
+# -> models/qwen3-embedding/tokenizer.json
+```
+
+Q8_0 is ~0.65 GB. If VRAM is tight, swap the GGUF for
+`Qwen3-Embedding-0.6B-Q4_K_M.gguf` from the same repo and update the compose
+command; quality drops slightly.
+
+### 10.3 Start llama.cpp + local-indexer + local-ui
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml \
+  up -d --build llama local-indexer local-ui
+```
+
+| Service | Port | Notes |
+| --- | --- | --- |
+| `llama` | `8081` → container `8080` | `--embedding --pooling last`, `-c 2048 -b 256 -ub 256 -ngl 99`, Q8_0 |
+| `local-indexer` | `50052` → container `50051` | gRPC only, `SERVE_ONLY=0`, writes Atlas + Qdrant |
+| `local-ui` | `8090` | `DASHBOARD_MODE=local`, the same dashboard plus controls |
+
+`local-indexer` reads `MONGODB_URI` / `QDRANT_URL` / `QDRANT_API_KEY` from `.env`
+and overrides:
+
+```
+SERVE_ONLY=0
+LLAMA_EMBED_URL=http://llama:8080
+QWEN3_TOKENIZER_PATH=/models/qwen3-embedding/tokenizer.json
+QDRANT_COLLECTION=lirify_lyrics_qwen3
+QDRANT_VECTOR_SIZE=1024
+LOCAL_INDEX_DIR=/data/local-index
+```
+
+Check the GPU before the first index run:
+
+```bash
+nvidia-smi --query-gpu=memory.used,memory.total --format=csv
+docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml logs -f llama
+curl -s http://localhost:8081/health
+```
+
+### 10.4 Index and publish
+
+1. Open <http://localhost:8090>.
+2. Paste a playlist URL → **Index now** (or queue several).
+3. Watch progress in **Live events**; commits are written straight to
+   Atlas/Qdrant and bump `index_stats.revision`.
+4. **Publish to cloud** re-upserts the committed index into Atlas/Qdrant and
+   rebuilds the two local files (`vocabulary.json`, `inverted_index.json`).
+   Every commit already does this via the commit hook, so publish is mainly for
+   a first backfill or after switching the Qdrant collection.
+5. The cloud replica picks up the new revision within
+   `INDEX_REFRESH_SECONDS`/`INDEX_CHECK_SECONDS`; to force it:
+
+```bash
+API=$(gcloud run services describe lirify-api --region us-central1 --format='value(status.url)')
+curl -s -X POST "$API/admin/reload" -H "Authorization: Bearer $BOT_INGEST_API_KEY"
+```
+
+### 10.5 Local artefacts
+
+Only two files are allowed on disk, under `/data/local-index` (compose volume)
+or `./local-index` (direct run):
+
+| File | Shape |
+| --- | --- |
+| `vocabulary.json` | `{tokenizer, terms: {subword: term_id}, documents}` |
+| `inverted_index.json` | `{terms: {term_id: {term, postings: {videoId: [positions]}}}}` |
+
+Both are written atomically by `services/local-indexer/local_store.py`. Do not
+add song dumps or local caches: tracks live in Atlas.
+
+---
+
+## 11. Day-2 operations
 
 | Task | How |
 | --- | --- |
-| Deploy a change | Push to `main`. |
+| Deploy a serving change | Push to `main`. |
 | Re-deploy the same commit | Actions → Deploy → Run workflow. |
 | Rotate the bot key | Update the `BOT_INGEST_API_KEY` secret, re-run the workflow (Terraform writes a new secret version and rolls the revision). |
 | Rotate the Atlas password | Update `MONGODB_URI`, re-run. |
-| Index a playlist as an operator | `https://index.joscart.win` → **Index now**. |
-| Index a playlist as an agent | `skills/lirify-playlist-indexer` (see `SKILL.md`). |
-| Inspect job history | Go dashboard → Queue, or `curl $API/queue`. |
-| Change capacity | `MAX_INDEXED_SONGS` defaults to 3000 with `python_memory = 1Gi` (~400 MB at 1700 songs). Raise both together; `-1` = unlimited for local only. |
+| Index a playlist | Local stack → `http://localhost:8090` → **Index now**. |
+| Publish/backfill the cloud | Local dashboard → **Publish to cloud**, then `POST /admin/reload`. |
+| Inspect job history | Local dashboard → Queue, or the cloud dashboard (read-only). |
+| Change capacity | `MAX_INDEXED_SONGS` defaults to 3000 with `python_memory = 1Gi` (~400 MB at 1700 songs). Raise both together; `-1` = unlimited on the laptop. |
+| Change embedding model/collection | New `QDRANT_COLLECTION` + `QDRANT_VECTOR_SIZE` everywhere, then publish. Never reuse a collection with a different dimension. |
 | Roll back | Re-run the workflow for the previous commit, or `gcloud run services update-traffic lirify-api --to-revisions=<rev>=100`. |
 
 ### Cost safety
@@ -325,7 +437,7 @@ versions. Cloud Run `max_instances = 1` prevents runaway scaling.
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
@@ -333,8 +445,11 @@ versions. Cloud Run `max_instances = 1` prevents runaway scaling.
 | Web UI shows API offline, `/healthz` 200 | `GRPC_TARGET` wrong or python cold | Check `gcloud run services describe lirify-web --format=yaml | grep GRPC_TARGET`; first request after idle takes ~5 s. |
 | gRPC calls fail with `PermissionDenied` | `python_public = false` | Set it back to `true`, or give the web UIs ID-token auth. |
 | `stats` shows `storage.tracks = memory` | `MONGODB_URI` not injected | Check the Secret Manager version exists and the revision has the env var. |
-| Recommendations always empty | Qdrant unreachable or empty | `storage.vectors` must be `qdrant`; the service backfills vectors on boot. |
-| Index job fails with `bot_check` | YouTube anti-bot challenge on the Cloud Run egress | Retry later, or pass cookies to yt-dlp via a custom image. |
+| Recommendations always empty | Qdrant unreachable, empty, or wrong collection | `storage.vectors` must be `qdrant`; confirm `QDRANT_COLLECTION=lirify_lyrics_qwen3` on **both** stacks and run **Publish to cloud** once. |
+| `403 read_only_serving_instance` on `/index` | Cloud api is `SERVE_ONLY=true` | Expected: index from the laptop stack. |
+| `UNIMPLEMENTED` on `IndexPlaylist` | Serving replica has indexing disabled | Expected: call `local-indexer:50051` instead. |
+| `503` / empty vectors after switching to Qwen3 | 1024-dim collection not published yet | Run **Publish to cloud**; do not reuse the 256-dim collection. |
+| Index job fails with `bot_check` | YouTube anti-bot challenge on the laptop egress | Retry later, or pass cookies to yt-dlp via a custom image. |
 | Index job fails: `Index capacity guard` | `Index capacity guard` | The service serves the newest `MAX_INDEXED_SONGS` (default 3000); raise the limit **and** memory, or prune. Measured: 1000 songs ≈ 227 MB RSS, 1661 ≈ 401 MB. |
 | Certificate stays `Provisioning` | DNS missing/typo'd (check the double-i host) | Fix DNS; re-check `gcloud run domain-mappings describe`. |
 | Atlas `bad auth : Authentication failed` | `authSource` points at the app database, but Atlas users live in `admin` | Append `?authSource=admin` to `MONGODB_URI` (and `MONGO_ROOT_URI`). |

@@ -177,6 +177,14 @@ section[id]{scroll-margin-top:20px}
 .input-shell .icon{position:absolute;left:12px;width:16px;height:16px;color:var(--text-4);pointer-events:none}
 .input-shell .input{padding-left:36px}
 .hint-inline{font-size:11px;color:var(--text-4);min-height:16px}
+.read-only-note{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:10px;border:1px solid color-mix(in oklab,var(--warn) 26%,transparent);background:color-mix(in oklab,var(--warn) 8%,transparent);font-size:11.5px;line-height:1.55;color:var(--text-2)}
+.read-only-note b{color:var(--warn);font-weight:650}
+.local-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+.local-cell{padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:color-mix(in oklab,var(--bg-0) 40%,transparent)}
+.local-cell b{display:block;font-family:var(--font-display);font-size:20px;font-weight:700;letter-spacing:-.03em}
+.local-cell span{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-4)}
+.local-cell code{display:block;margin-top:4px;font-family:var(--font-mono);font-size:10px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ------------------------------------------------------------------ hero */
 .hero{position:relative;isolation:isolate;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:clamp(20px,4vw,54px);align-items:center;min-height:312px;padding:clamp(24px,3vw,38px);border-radius:var(--radius-xl);border:1px solid color-mix(in oklab,var(--accent) 22%,var(--line));background:radial-gradient(120% 160% at 0% 0%,color-mix(in oklab,var(--accent) 30%,transparent),transparent 58%),radial-gradient(100% 140% at 100% 10%,color-mix(in oklab,var(--accent-2) 18%,transparent),transparent 55%),linear-gradient(145deg,var(--surface-2),var(--bg-1) 68%);box-shadow:var(--shadow-lg);animation:rise .5s var(--ease-out) both}
 .hero::before{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,transparent 40%,rgb(5 4 9 / 50%))}
@@ -447,7 +455,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
       </span>
       <span>
         <span class="brand-name">lirify<span>.</span></span>
-        <span class="brand-tag">indexer</span>
+        <span class="brand-tag">{{if .LocalMode}}indexer{{else}}serving{{end}}</span>
       </span>
     </a>
     <button class="icon-btn mobile-only sidebar-close" id="sideClose" aria-label="Close navigation"><svg class="icon"><use href="#i-close"/></svg></button>
@@ -458,7 +466,8 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
       <a class="nav-item" href="#queue" data-nav="queue"><svg class="icon"><use href="#i-queue"/></svg><span>Queue</span><span class="nav-hint">03</span></a>
       <a class="nav-item" href="#metrics" data-nav="metrics"><svg class="icon"><use href="#i-metrics"/></svg><span>Metrics</span><span class="nav-hint">04</span></a>
       <a class="nav-item" href="#matrices" data-nav="matrices"><svg class="icon"><use href="#i-matrix"/></svg><span>Matrices</span><span class="nav-hint">05</span></a>
-      <a class="nav-item" href="#diagnostics" data-nav="diagnostics"><svg class="icon"><use href="#i-diagnostics"/></svg><span>Diagnostics</span><span class="nav-hint">06</span></a>
+      {{if .LocalMode}}<a class="nav-item" href="#local-index" data-nav="local-index"><svg class="icon"><use href="#i-database"/></svg><span>Local index</span><span class="nav-hint">06</span></a>{{end}}
+      <a class="nav-item" href="#diagnostics" data-nav="diagnostics"><svg class="icon"><use href="#i-diagnostics"/></svg><span>Diagnostics</span><span class="nav-hint">{{if .LocalMode}}07{{else}}06{{end}}</span></a>
     </nav>
 
     <div class="side-card">
@@ -494,16 +503,20 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
       <main class="view">
         <section class="hero" id="overview">
           <div class="hero-copy">
-            <div class="hero-kicker"><span class="dot"></span>Indexer control room</div>
-            <h1>Feed the <em>lyric graph</em>.</h1>
+            <div class="hero-kicker"><span class="dot"></span>{{if .LocalMode}}Local indexer control room{{else}}Read-only serving dashboard{{end}}</div>
+            <h1>{{if .LocalMode}}Feed the <em>lyric graph</em>.{{else}}Serve the <em>lyric graph</em>.{{end}}</h1>
+            {{if .LocalMode}}
             <p>Scrape playlists, watch the two-stage queue, and inspect the similarity matrices that power Lirify's search and recommendations. Everything is accumulative — playlists add to the live index.</p>
+            {{else}}
+            <p>This replica serves the committed lyric index: search, recommendations, synced lyrics and the player surface. Indexing and publishing run on the laptop <code>local-indexer</code> stack, never here.</p>
+            {{end}}
             <div class="hero-actions">
-              <button class="btn btn-primary" data-scroll="ingest"><svg class="icon"><use href="#i-ingest"/></svg>Index a playlist</button>
+              {{if .LocalMode}}<button class="btn btn-primary" data-scroll="ingest"><svg class="icon"><use href="#i-ingest"/></svg>Index a playlist</button>{{else}}<button class="btn btn-primary" data-scroll="metrics"><svg class="icon"><use href="#i-metrics"/></svg>Inspect the index</button>{{end}}
               <button class="btn btn-ghost" data-scroll="queue"><svg class="icon"><use href="#i-queue"/></svg>Open queue</button>
               <a class="btn btn-outline" id="heroPlayerLink" href="#" target="_blank" rel="noreferrer"><svg class="icon"><use href="#i-play"/></svg>Listen</a>
             </div>
             <div class="hero-meta">
-              <span class="chip"><span class="dot is-live"></span><span id="allowedChip">en + es only</span></span>
+              <span class="chip"><span class="dot is-live"></span><span id="allowedChip">all languages</span></span>
               <span id="lastRefresh">Fetching index state…</span>
             </div>
           </div>
@@ -537,11 +550,15 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
             <div class="panel-head">
               <div>
                 <span class="eyebrow">Ingest</span>
-                <h2>Extract &amp; index</h2>
-                <div class="sub">A YouTube video or playlist URL. Extraction is read-only; indexing commits eligible lyrics.</div>
+                <h2>{{if .LocalMode}}Extract &amp; index{{else}}Index ownership{{end}}</h2>
+                <div class="sub">{{if .LocalMode}}A YouTube video or playlist URL. Extraction is read-only; indexing commits eligible lyrics.{{else}}Write controls are disabled: this dashboard only reads committed statistics.{{end}}</div>
               </div>
-              <div class="panel-actions"><span class="chip" id="ingestBadge">idle</span></div>
+              <div class="panel-actions"><span class="chip" id="ingestBadge">{{if .LocalMode}}idle{{else}}read-only{{end}}</span></div>
             </div>
+
+            {{if not .LocalMode}}
+            <div class="read-only-note"><span class="dot is-off"></span><div><b>Read-only replica.</b> Indexing, publishing and retries belong to the local-indexer + llama.cpp stack on the laptop. Point <code>DASHBOARD_MODE=local</code> at that backend to use these controls.</div></div>
+            {{end}}
 
             <div class="ingest-form">
               <div class="field-grid">
@@ -549,18 +566,18 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
                   <span>Playlist or video URL</span>
                   <div class="input-shell">
                     <svg class="icon"><use href="#i-link"/></svg>
-                    <input class="input" id="url" type="url" placeholder="https://youtube.com/playlist?list=… or https://youtu.be/…" autocomplete="off" required>
+                    <input class="input" id="url" type="url" placeholder="https://youtube.com/playlist?list=… or https://youtu.be/…" autocomplete="off" {{if not .LocalMode}}disabled{{end}}>
                   </div>
                 </label>
                 <label class="field">
                   <span>Limit</span>
-                  <input class="input" id="limit" type="number" min="1" placeholder="all">
+                  <input class="input" id="limit" type="number" min="1" placeholder="all" {{if not .LocalMode}}disabled{{end}}>
                 </label>
               </div>
               <div class="form-row">
-                <button class="btn btn-ghost" id="extractBtn" type="button"><svg class="icon"><use href="#i-queue"/></svg>Extract IDs</button>
-                <button class="btn btn-primary" id="indexBtn" type="button"><svg class="icon"><use href="#i-ingest"/></svg>Index now</button>
-                <span class="hint-inline" id="msg">Commands run over gRPC to the python-backend.</span>
+                <button class="btn btn-ghost" id="extractBtn" type="button" {{if not .LocalMode}}disabled{{end}}><svg class="icon"><use href="#i-queue"/></svg>Extract IDs</button>
+                <button class="btn btn-primary" id="indexBtn" type="button" {{if not .LocalMode}}disabled{{end}}><svg class="icon"><use href="#i-ingest"/></svg>Index now</button>
+                <span class="hint-inline" id="msg">{{if .LocalMode}}Commands run over gRPC to the local-indexer.{{else}}Indexing runs on the laptop, over gRPC to <code>local-indexer</code>.{{end}}</span>
               </div>
             </div>
 
@@ -618,7 +635,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
                 <div><b id="cacheCachedMini">0</b><span>lyrics cached</span></div>
                 <div><b id="cacheFailedMini">0</b><span>failed songs</span></div>
               </div>
-              <button class="btn btn-ghost btn-sm" id="retryMini" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Retry failed songs</button>
+              <button class="btn btn-ghost btn-sm" id="retryMini" type="button" {{if not .LocalMode}}disabled{{end}}><svg class="icon"><use href="#i-refresh"/></svg>Retry failed songs</button>
             </section>
           </aside>
         </div>
@@ -627,19 +644,19 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
           <div class="panel-head">
             <div>
               <span class="eyebrow">Queue</span>
-              <h2>Playlist intake</h2>
-              <div class="sub">One URL per line. Jobs are persisted, retried with backoff, and committed batch by batch.</div>
+              <h2>{{if .LocalMode}}Playlist intake{{else}}Job history{{end}}</h2>
+              <div class="sub">{{if .LocalMode}}One URL per line. Jobs are persisted, retried with backoff, and committed batch by batch.{{else}}Read-only view of jobs committed by the local indexer. This replica never enqueues work.{{end}}</div>
             </div>
             <div class="panel-actions"><span class="chip" id="queueJobCount">0 jobs</span></div>
           </div>
           <div class="ingest-form">
             <label class="field">
               <span>Playlist URLs</span>
-              <textarea class="textarea" id="urls" rows="4" placeholder="https://youtube.com/playlist?list=…&#10;https://youtu.be/VIDEO_ID"></textarea>
+              <textarea class="textarea" id="urls" rows="4" placeholder="{{if .LocalMode}}https://youtube.com/playlist?list=…&#10;https://youtu.be/VIDEO_ID{{else}}Read-only replica: enqueue on the local indexer{{end}}" {{if not .LocalMode}}disabled{{end}}></textarea>
             </label>
             <div class="form-row">
-              <label class="field" style="max-width:120px"><span>Limit</span><input class="input" id="queueLimit" type="number" min="1" placeholder="all"></label>
-              <button class="btn btn-primary" id="queueBtn" type="button"><svg class="icon"><use href="#i-queue"/></svg>Queue playlists</button>
+              <label class="field" style="max-width:120px"><span>Limit</span><input class="input" id="queueLimit" type="number" min="1" placeholder="all" {{if not .LocalMode}}disabled{{end}}></label>
+              <button class="btn btn-primary" id="queueBtn" type="button" {{if not .LocalMode}}disabled{{end}}><svg class="icon"><use href="#i-queue"/></svg>Queue playlists</button>
               <span class="hint-inline" id="queueMsg"></span>
             </div>
           </div>
@@ -661,7 +678,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
             <div class="metric-card"><h3>Languages</h3><div class="bars" id="languageBars"></div></div>
             <div class="metric-card"><h3>Lyrics backends</h3><div class="bars" id="backendBars"></div></div>
             <div class="metric-card"><h3>Similarity weights</h3><div class="bars" id="weightBars"></div></div>
-            <div class="metric-card"><h3>Allowed languages</h3><div class="chips" id="allowedList"></div><h3 style="margin-top:12px">Data files</h3><div class="chips" id="dataFiles"></div></div>
+            <div class="metric-card"><h3>Language filter</h3><div class="chips" id="allowedList"></div><h3 style="margin-top:12px">Data files</h3><div class="chips" id="dataFiles"></div></div>
           </div>
           <div class="metric-card" style="margin-top:12px"><h3>Lyrics provider fallback chain</h3><div class="provider-chain" id="providersList"></div></div>
           <div class="metric-card" style="margin-top:12px"><h3>Top terms by document frequency</h3><div class="chips" id="topTerms"></div></div>
@@ -678,10 +695,33 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
           <div class="matrix-legend"><span>Weak</span><div class="legend-gradient"></div><span>Strong</span><span class="spacer"></span><span id="matrixLegendLabel">unified</span></div>
         </section>
 
+        {{if .LocalMode}}
+        <section class="panel" id="local-index">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Local persistence</span>
+              <h2>Qwen3 vocabulary &amp; inverted index</h2>
+              <div class="sub">Only two files live on this laptop: the Qwen3-Embedding-0.6B vocabulary and the full inverted index built from it. Tracks, embeddings and jobs stay in Atlas/Qdrant.</div>
+            </div>
+            <div class="panel-actions">
+              <button class="btn btn-ghost btn-sm" id="refreshLocal" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Refresh</button>
+              <button class="btn btn-primary btn-sm" id="publishBtn" type="button"><svg class="icon"><use href="#i-database"/></svg>Publish to cloud</button>
+            </div>
+          </div>
+          <div class="local-grid">
+            <div class="local-cell"><b id="localVocabTerms">—</b><span>vocabulary terms</span><code id="localVocabPath">—</code></div>
+            <div class="local-cell"><b id="localInvertedTerms">—</b><span>inverted terms</span><code id="localInvertedPath">—</code></div>
+            <div class="local-cell"><b id="localDocs">—</b><span>documents</span><code id="localDir">—</code></div>
+            <div class="local-cell"><b id="localUpdated">—</b><span>last rebuild</span><code id="localEmbed">—</code></div>
+          </div>
+          <div class="form-row" style="margin-top:12px"><span class="hint-inline" id="publishMsg">Publishing re-upserts the committed index into Atlas and Qdrant; commits also rewrite these files over gRPC.</span></div>
+        </section>
+        {{end}}
+
         <section class="panel" id="diagnostics">
           <div class="panel-head">
             <div><span class="eyebrow">Diagnostics</span><h2>Cache &amp; failed songs</h2><div class="sub">Negative results are retried in the background; this is the queue behind that worker.</div></div>
-            <div class="panel-actions"><button class="btn btn-primary btn-sm" id="retryBtn" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Retry now</button></div>
+            <div class="panel-actions"><button class="btn btn-primary btn-sm" id="retryBtn" type="button" {{if not .LocalMode}}disabled{{end}}><svg class="icon"><use href="#i-refresh"/></svg>Retry now</button></div>
           </div>
           <div class="cache-cards">
             <div class="stat-tile"><b id="cacheCached">0</b><span>Lyrics cached</span></div>
@@ -704,6 +744,9 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
 <script>
 (function () {
   "use strict";
+
+  // Injected by go-ui: true only for DASHBOARD_MODE=local (the laptop).
+  var LOCAL_MODE = {{if .LocalMode}}true{{else}}false{{end}};
 
   var $ = function (id) { return document.getElementById(id); };
   var $$ = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
@@ -830,6 +873,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
     queue: null,
     cache: null,
     matrices: null,
+    localIndex: null,
     matrixName: "unified",
     events: [],
     lastIds: [],
@@ -995,6 +1039,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
   }
 
   function setBusy(busy, label) {
+    if (!LOCAL_MODE) return;
     state.busy = busy;
     $("extractBtn").disabled = busy;
     $("indexBtn").disabled = busy;
@@ -1063,10 +1108,11 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
     ].join("");
 
     $("matrixShapeChip").textContent = (s.matrix_shape || [0, 0]).join(" × ");
-    $("allowedChip").textContent = (s.allowed_languages || []).join(" + ") + " only";
-    $("allowedList").innerHTML = (s.allowed_languages || []).map(function (code) {
-      return '<span class="chip good">' + esc(code) + '</span>';
-    }).join("") || '<span class="chip">—</span>';
+    var allowed = s.allowed_languages || [];
+    $("allowedChip").textContent = allowed.length ? allowed.join(" + ") + " only" : "all languages";
+    $("allowedList").innerHTML = allowed.length
+      ? allowed.map(function (code) { return '<span class="chip good">' + esc(code) + '</span>'; }).join("")
+      : '<span class="chip good">any language</span>';
 
     bars($("languageBars"), s.languages, 10);
     bars($("backendBars"), s.backends, 10);
@@ -1184,6 +1230,52 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
     } finally {
       state.retrying = false;
       buttons.forEach(function (button) { if (button) { button.disabled = false; button.classList.remove("is-busy"); if (button.dataset.label) button.innerHTML = button.dataset.label; } });
+    }
+  }
+
+  /* ---------------------------------------------------------------- local index */
+  function fmtBytes(value) {
+    var bytes = Number(value) || 0;
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " MB";
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return bytes + " B";
+  }
+
+  async function refreshLocalIndex() {
+    if (!LOCAL_MODE || !$("localVocabTerms")) return null;
+    var info = await api("/local-index");
+    state.localIndex = info;
+    $("localVocabTerms").textContent = num(info.vocabulary_terms);
+    $("localInvertedTerms").textContent = num(info.inverted_terms);
+    $("localDocs").textContent = num(info.documents);
+    $("localUpdated").textContent = info.updated_at ? clock(info.updated_at) : "—";
+    $("localVocabPath").textContent = (info.vocabulary_path || "—") + " · " + fmtBytes(info.vocabulary_bytes);
+    $("localInvertedPath").textContent = (info.inverted_index_path || "—") + " · " + fmtBytes(info.inverted_index_bytes);
+    $("localDir").textContent = info.directory || "—";
+    $("localEmbed").textContent = (info.embedding_provider || "hash") + " · " + (info.tokenizer || "legacy") + " · " + (info.tokenizer_backend || "");
+    return info;
+  }
+
+  async function publishToCloud() {
+    if (!LOCAL_MODE) return;
+    var button = $("publishBtn");
+    var label = button.innerHTML;
+    button.disabled = true;
+    button.classList.add("is-busy");
+    button.innerHTML = icon("refresh") + "Publishing…";
+    $("publishMsg").textContent = "Upserting committed songs into Atlas + Qdrant and rebuilding the local index…";
+    try {
+      var result = await postJSON("/publish", { rebuild_local_index: true });
+      $("publishMsg").textContent = result.message || "Published";
+      toast("Published " + num(result.songs) + " songs to the cloud");
+      await Promise.allSettled([refreshLocalIndex(), refreshStats(), refreshQueue()]);
+    } catch (error) {
+      $("publishMsg").textContent = error.message;
+      toast("Publish failed: " + error.message, "error");
+    } finally {
+      button.disabled = false;
+      button.classList.remove("is-busy");
+      button.innerHTML = label;
     }
   }
 
@@ -1374,7 +1466,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
   async function refreshAll(options) {
     var quiet = options && options.quiet;
     var results = await Promise.allSettled([
-      refreshStats(), refreshQueue(), refreshCache(), loadMatrices(false)
+      refreshStats(), refreshQueue(), refreshCache(), loadMatrices(false), refreshLocalIndex()
     ]);
     var failed = results.filter(function (result) {
       return result.status === "rejected" && (!result.reason || !result.reason.status || result.reason.status >= 500);
@@ -1396,6 +1488,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
       .catch(function () { toast("Could not copy IDs", "error"); });
   });
 
+  if (LOCAL_MODE) {
   $("extractBtn").addEventListener("click", function () {
     var url = $("url").value.trim();
     if (!url) { toast("Paste a YouTube URL first", "error"); $("url").focus(); return; }
@@ -1442,6 +1535,12 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
     if (button) button.addEventListener("click", retryFailed);
   });
 
+  $("publishBtn").addEventListener("click", publishToCloud);
+  $("refreshLocal").addEventListener("click", function () {
+    refreshLocalIndex().then(function () { toast("Local index state reloaded"); }).catch(function (error) { toast(error.message, "error"); });
+  });
+  }
+
   $("refreshQueue").addEventListener("click", function () { refreshQueue().then(function () { toast("Queue refreshed"); }).catch(function (error) { toast(error.message, "error"); }); });
   $("refreshAll").addEventListener("click", function () {
     refreshAll({ quiet: false });
@@ -1482,11 +1581,13 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
     $$(".nav-item").forEach(function (item) {
       item.classList.toggle("is-active", item.dataset.nav === id);
     });
-    var labels = { overview: "Overview", ingest: "Ingest", queue: "Queue", metrics: "Metrics", matrices: "Matrices", diagnostics: "Diagnostics" };
+    var labels = { overview: "Overview", ingest: "Ingest", queue: "Queue", metrics: "Metrics", matrices: "Matrices", "local-index": "Local index", diagnostics: "Diagnostics" };
     if (labels[id]) $("crumbPage").textContent = labels[id];
   }
 
-  var sections = ["overview", "ingest", "queue", "metrics", "matrices", "diagnostics"];
+  var sections = ["overview", "ingest", "queue", "metrics", "matrices"];
+  if (LOCAL_MODE) sections.push("local-index");
+  sections.push("diagnostics");
   function updateActiveFromScroll() {
     var scroller = $("scroll");
     var anchor = scroller.getBoundingClientRect().top + 150;

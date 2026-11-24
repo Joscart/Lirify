@@ -25,7 +25,7 @@ import main as core
 import player_api
 from lirifypb import lirify_pb2 as pb
 from lirifypb import lirify_pb2_grpc as pb_grpc
-from vector import get_vector_store
+from vector import EMBEDDING_PROVIDER, get_vector_store
 
 VECTORS = get_vector_store()
 MAX_MESSAGE = 16 * 1024 * 1024
@@ -116,6 +116,14 @@ async def _abort(context: Any, code: "grpc.StatusCode", message: str) -> None:
     except Exception:
         pass
     await context.abort(code, message)
+
+
+async def _reject_on_serving(context: Any) -> bool:
+    """Return True (after aborting) when this is a read-only serving replica."""
+    if not core.SERVE_ONLY:
+        return False
+    await _abort(context, grpc.StatusCode.UNIMPLEMENTED, core.READ_ONLY_DETAIL)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +238,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
 
     # -- indexing -------------------------------------------------------
     async def IndexPlaylist(self, request, context):  # noqa: N802
+        if await _reject_on_serving(context):
+            return pb.Job()
         from bot_api import validate_playlist_url
         from fastapi import HTTPException
 
@@ -249,6 +259,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         return _job(job)
 
     async def QueuePlaylists(self, request, context):  # noqa: N802
+        if await _reject_on_serving(context):
+            return pb.QueuePlaylistsResponse()
         from bot_api import validate_playlist_url
         from fastapi import HTTPException
 
@@ -277,6 +289,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         return pb.GetJobResponse(job=_job(job))
 
     async def ExtractVideoIds(self, request, context):  # noqa: N802
+        if await _reject_on_serving(context):
+            return pb.ExtractVideoIdsResponse()
         url = (request.playlist_url or "").strip()
         if not url:
             await _abort(context, grpc.StatusCode.INVALID_ARGUMENT, "playlist_url is required")
@@ -311,6 +325,19 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         queue = payload.get("queue") or {}
         recent = await asyncio.to_thread(core.STORE.jobs_recent, 25)
         storage = payload.get("storage") or {}
+        # Present only in the local-indexer image; the serving image has no
+        # local_store module and reports zeros.
+        local_vocab = local_terms = 0
+        local_dir = ""
+        try:
+            import local_store
+
+            info = await asyncio.to_thread(local_store.info)
+            local_vocab = int(info.get("vocabulary_terms") or 0)
+            local_terms = int(info.get("inverted_terms") or 0)
+            local_dir = str(info.get("directory") or "")
+        except Exception:
+            pass
         return pb.IndexStats(
             indexed_songs=int(payload.get("indexed_songs") or 0),
             video_ids=int(payload.get("video_ids") or 0),
@@ -333,6 +360,14 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
             tracks_store=str(storage.get("tracks") or ""),
             vectors_store=str(storage.get("vectors") or ""),
             max_indexed_songs=int(storage.get("max_indexed_songs") or 0),
+            serve_only=core.SERVE_ONLY,
+            mode="serve-only" if core.SERVE_ONLY else "indexer",
+            embedding_provider=EMBEDDING_PROVIDER,
+            tokenizer=core.qwen_tokenizer.TOKENIZER_ID if core.qwen_tokenizer.available() else "legacy",
+            jaccard_scope=str(payload.get("jaccard_scope") or core.JACCARD_SCOPE),
+            local_vocabulary_terms=local_vocab,
+            local_inverted_terms=local_terms,
+            local_index_dir=local_dir,
         )
 
     async def GetFailedSongs(self, request, context):  # noqa: N802
@@ -364,6 +399,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
         )
 
     async def RetryFailed(self, request, context):  # noqa: N802
+        if await _reject_on_serving(context):
+            return pb.RetryFailedResponse()
         global _RETRY_TASK
         if _RETRY_TASK is not None and not _RETRY_TASK.done():
             return pb.RetryFailedResponse(
@@ -416,6 +453,8 @@ class LirifyServicer(pb_grpc.LirifyServiceServicer):
 
     # -- bot ------------------------------------------------------------
     async def IndexPlaylistFromBot(self, request, context):  # noqa: N802
+        if await _reject_on_serving(context):
+            return pb.IndexPlaylistFromBotResponse()
         from bot_api import validate_playlist_url
         from fastapi import HTTPException
 

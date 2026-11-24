@@ -2,13 +2,25 @@
 //
 // Single source of truth for every service boundary:
 //
-//   astro-webui  (lirify.joscart.win)        -> Search / Recommend / GetTrack /
+//   CLOUD (read-only serving stack, three services)
+//     astro-webui  (lirify.joscart.win)      -> Search / Recommend / GetTrack /
 //                                               GetLyrics / ListTracks / Stream
-//   go-webui     (index.<domain>)            -> IndexPlaylist / QueuePlaylists /
-//                                               GetJob / GetIndexStats / WatchIndexStats
-//   external AI bot (HTTP/JSON gateway)      -> IndexPlaylistFromBot
+//     go-webui     (index.<domain>)          -> GetIndexStats / WatchIndexStats /
+//                                               GetJob (read-only dashboard)
+//     python-backend (SERVE_ONLY=true)       -> serves committed state only;
+//                                               every indexing RPC answers
+//                                               UNIMPLEMENTED
 //
-// python-backend is the only process that owns MongoDB Atlas and Qdrant Cloud.
+//   LOCAL (laptop indexing stack)
+//     local-ui     (dashboard, DASHBOARD_MODE=local)
+//                                            -> LirifyService (read + index RPCs)
+//                                            -> LirifyIndexerService (publish,
+//                                               local vocabulary + inverted index)
+//     local-indexer (SERVE_ONLY=false)       -> full indexing pipeline backed by
+//                                               llama.cpp Qwen3-Embedding-0.6B
+//
+// local-indexer is the only writer of MongoDB Atlas and Qdrant Cloud. The cloud
+// python-backend mounts them read-only and never scrapes, embeds or commits.
 // Neither web UI ever dials a database.
 //
 // Code generation (see scripts/gen_proto.sh):
@@ -715,5 +727,157 @@ var LirifyService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
+	Metadata: "lirify.proto",
+}
+
+const (
+	LirifyIndexerService_PublishToCloud_FullMethodName = "/lirify.v1.LirifyIndexerService/PublishToCloud"
+	LirifyIndexerService_GetLocalIndex_FullMethodName  = "/lirify.v1.LirifyIndexerService/GetLocalIndex"
+)
+
+// LirifyIndexerServiceClient is the client API for LirifyIndexerService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Laptop-only operations. Registered by local-indexer (SERVE_ONLY=false) and
+// never by the Cloud Run serving instance.
+type LirifyIndexerServiceClient interface {
+	// Force a write-through of the committed index to Atlas + Qdrant and
+	// optionally rebuild the local Qwen3 vocabulary/inverted index files.
+	PublishToCloud(ctx context.Context, in *PublishToCloudRequest, opts ...grpc.CallOption) (*PublishToCloudResponse, error)
+	// Describe the local vocabulary + inverted index (paths, sizes, counts).
+	GetLocalIndex(ctx context.Context, in *GetLocalIndexRequest, opts ...grpc.CallOption) (*GetLocalIndexResponse, error)
+}
+
+type lirifyIndexerServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewLirifyIndexerServiceClient(cc grpc.ClientConnInterface) LirifyIndexerServiceClient {
+	return &lirifyIndexerServiceClient{cc}
+}
+
+func (c *lirifyIndexerServiceClient) PublishToCloud(ctx context.Context, in *PublishToCloudRequest, opts ...grpc.CallOption) (*PublishToCloudResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PublishToCloudResponse)
+	err := c.cc.Invoke(ctx, LirifyIndexerService_PublishToCloud_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *lirifyIndexerServiceClient) GetLocalIndex(ctx context.Context, in *GetLocalIndexRequest, opts ...grpc.CallOption) (*GetLocalIndexResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLocalIndexResponse)
+	err := c.cc.Invoke(ctx, LirifyIndexerService_GetLocalIndex_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// LirifyIndexerServiceServer is the server API for LirifyIndexerService service.
+// All implementations must embed UnimplementedLirifyIndexerServiceServer
+// for forward compatibility.
+//
+// Laptop-only operations. Registered by local-indexer (SERVE_ONLY=false) and
+// never by the Cloud Run serving instance.
+type LirifyIndexerServiceServer interface {
+	// Force a write-through of the committed index to Atlas + Qdrant and
+	// optionally rebuild the local Qwen3 vocabulary/inverted index files.
+	PublishToCloud(context.Context, *PublishToCloudRequest) (*PublishToCloudResponse, error)
+	// Describe the local vocabulary + inverted index (paths, sizes, counts).
+	GetLocalIndex(context.Context, *GetLocalIndexRequest) (*GetLocalIndexResponse, error)
+	mustEmbedUnimplementedLirifyIndexerServiceServer()
+}
+
+// UnimplementedLirifyIndexerServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedLirifyIndexerServiceServer struct{}
+
+func (UnimplementedLirifyIndexerServiceServer) PublishToCloud(context.Context, *PublishToCloudRequest) (*PublishToCloudResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PublishToCloud not implemented")
+}
+func (UnimplementedLirifyIndexerServiceServer) GetLocalIndex(context.Context, *GetLocalIndexRequest) (*GetLocalIndexResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetLocalIndex not implemented")
+}
+func (UnimplementedLirifyIndexerServiceServer) mustEmbedUnimplementedLirifyIndexerServiceServer() {}
+func (UnimplementedLirifyIndexerServiceServer) testEmbeddedByValue()                              {}
+
+// UnsafeLirifyIndexerServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to LirifyIndexerServiceServer will
+// result in compilation errors.
+type UnsafeLirifyIndexerServiceServer interface {
+	mustEmbedUnimplementedLirifyIndexerServiceServer()
+}
+
+func RegisterLirifyIndexerServiceServer(s grpc.ServiceRegistrar, srv LirifyIndexerServiceServer) {
+	// If the following call pancis, it indicates UnimplementedLirifyIndexerServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&LirifyIndexerService_ServiceDesc, srv)
+}
+
+func _LirifyIndexerService_PublishToCloud_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PublishToCloudRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LirifyIndexerServiceServer).PublishToCloud(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LirifyIndexerService_PublishToCloud_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LirifyIndexerServiceServer).PublishToCloud(ctx, req.(*PublishToCloudRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LirifyIndexerService_GetLocalIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLocalIndexRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LirifyIndexerServiceServer).GetLocalIndex(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LirifyIndexerService_GetLocalIndex_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LirifyIndexerServiceServer).GetLocalIndex(ctx, req.(*GetLocalIndexRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// LirifyIndexerService_ServiceDesc is the grpc.ServiceDesc for LirifyIndexerService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var LirifyIndexerService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "lirify.v1.LirifyIndexerService",
+	HandlerType: (*LirifyIndexerServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "PublishToCloud",
+			Handler:    _LirifyIndexerService_PublishToCloud_Handler,
+		},
+		{
+			MethodName: "GetLocalIndex",
+			Handler:    _LirifyIndexerService_GetLocalIndex_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "lirify.proto",
 }

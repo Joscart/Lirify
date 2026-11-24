@@ -35,9 +35,29 @@ from lyrics_sources import PROVIDERS as LYRICS_PROVIDERS
 from lyrics_sources import fetch_lyrics, lyrics_to_text, probe_instrumental
 from bot_api import TERMINAL_ERRORS, build_bot_router, classify_playlist_error
 from store import get_store, new_job_id
-from vector import embed_lyrics, get_vector_store
+from vector import EMBEDDING_PROVIDER, embed_lyrics, get_vector_store
+import qwen_tokenizer
 
-WEIGHTS = {"name": 0.10, "artist": 0.05, "lang": 0.05, "lyrics": 0.8}
+# Similarity weights. Jaccard is only used for the title and artist signals;
+# lyrics is TF-IDF cosine. Language is no longer a similarity dimension (and no
+# language is filtered out of the index).
+WEIGHTS = {"name": 0.10, "artist": 0.05, "lyrics": 0.85}
+JACCARD_SCOPE = "name+artist"
+
+# ---------------------------------------------------------------------------
+# Serving mode (the cloud/local split)
+# ---------------------------------------------------------------------------
+# The Cloud Run image is a READ-ONLY serving replica: it hydrates committed state
+# from Atlas/Qdrant and answers search/recommend/lyrics/player RPCs, but never
+# scrapes, embeds, commits or runs an indexing worker. The laptop indexer runs
+# the same code with SERVE_ONLY=false and owns every write. Default is the safe
+# side: a deployment that forgets the flag can serve but not mutate.
+SERVE_ONLY = (os.environ.get("SERVE_ONLY", "1").strip().lower() not in {"0", "false", "no", "off"})
+SERVING_MODE = "serve-only" if SERVE_ONLY else "indexer"
+READ_ONLY_DETAIL = (
+    "This instance is a read-only serving replica (SERVE_ONLY=true). "
+    "Indexing runs on the local-indexer stack; see docs/ARCHITECTURE.md."
+)
 
 # video id -> YouTube duration in seconds, filled while extracting ids.
 DURATIONS: Dict[str, float] = {}
@@ -59,6 +79,15 @@ PLAYLIST_QUEUE: asyncio.Queue = asyncio.Queue()
 MATRIX_QUEUE: asyncio.Queue = asyncio.Queue()
 COMMIT_LOCK = asyncio.Lock()
 WORKERS: List[asyncio.Task] = []
+# Optional post-commit hooks. The local indexer registers one to rewrite the
+# Qwen3 vocabulary + inverted index; the serving replica registers none.
+COMMIT_HOOKS: List[Any] = []
+
+
+def register_commit_hook(hook: Any) -> None:
+    COMMIT_HOOKS.append(hook)
+
+
 GRPC_SERVER = None
 GRPC_ERROR = ""
 MONGO_ERROR = ""
@@ -242,7 +271,9 @@ except Exception:  # pragma: no cover
 
 
 def remove_special(text: str) -> str:
-    return re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
+    # Keep Unicode word characters so non-Latin titles/lyrics survive the legacy
+    # tokenizer path (the Qwen3 path tokenizes the original text anyway).
+    return re.sub(r"[^\w ]", "", text.lower(), flags=re.UNICODE).strip()
 
 
 def normalize_name(text: str) -> str:
@@ -260,29 +291,6 @@ def normalize_lang(text: str) -> str:
 
 TIMESTAMP_RE = re.compile(r"\[\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?\]")
 LRC_META_RE = re.compile(r"^\[[A-Za-z]+:.*?\]$", re.M)
-NON_LATIN_RE = re.compile(
-    r"[\u0370-\u03ff\u0400-\u04ff\u0590-\u05ff\u0600-\u06ff"
-    r"\u0900-\u097f\u0e00-\u0e7f\u3040-\u30ff\u3400-\u4dbf"
-    r"\u4e00-\u9fff\uac00-\ud7af]"
-)
-
-# Only English and Spanish songs may enter the index.
-ALLOWED_LANGUAGES = {"en", "es"}
-
-ENGLISH_HINTS = {
-    "the", "and", "you", "that", "this", "with", "have", "from", "your", "what",
-    "when", "were", "there", "they", "will", "would", "could", "should", "about",
-    "just", "like", "know", "want", "need", "love", "time", "heart", "night",
-    "day", "life", "never", "again", "because", "through", "over", "into",
-}
-
-SPANISH_HINTS = {
-    "el", "la", "los", "las", "de", "del", "que", "y", "en", "un", "una", "por",
-    "para", "con", "sin", "mi", "tu", "su", "es", "son", "estoy", "estas", "esta",
-    "como", "pero", "mas", "muy", "todo", "todos", "nada", "amor", "corazon",
-    "vida", "noche", "dia", "siempre", "nunca", "quiero", "puedo", "tengo",
-    "eres", "somos", "cuando", "donde", "porque", "hasta", "desde", "tiempo",
-}
 
 
 def normalize_lyrics(text: str, lang: str) -> List[str]:
@@ -300,13 +308,31 @@ def normalize_lyrics(text: str, lang: str) -> List[str]:
     return tokens
 
 
+def lyrics_terms(text: str, lang: str) -> List[str]:
+    """Lyric terms for the index, vocabulary and inverted index.
+
+    When the Qwen3-Embedding tokenizer is available (the local indexer mounts the
+    ``tokenizer.json``), terms are the model's own subwords: that is what keeps
+    the persisted vocabulary aligned with the llama.cpp embeddings. Elsewhere —
+    including the Cloud Run serving image, which ships no model assets — the
+    legacy whitespace/stem tokenizer answers instead.
+    """
+    if qwen_tokenizer.available():
+        cleaned = LRC_META_RE.sub(" ", TIMESTAMP_RE.sub(" ", text or ""))
+        cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+        terms = qwen_tokenizer.tokenize_terms(cleaned)
+        if terms:
+            return terms
+    return normalize_lyrics(text, lang)
+
+
 # ---------------------------------------------------------------------------
 # Scraping
 # ---------------------------------------------------------------------------
 
 def extract_video_ids(url: str) -> List[str]:
     cmd = [
-        "yt-dlp", "--flat-playlist", "--no-warnings",
+        "yt-dlp", "--flat-playlist", "--no-warnings", "--no-cache-dir",
         "--print", "%(id)s\t%(duration)s", url,
     ]
     out = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -356,56 +382,27 @@ def parse_title(title: str, author: str):
 
 
 def detect_language(text: str) -> str:
-    """Detect language with an English/Spanish fallback pass.
+    """Best-effort language label used for display/metadata only.
 
-    langdetect wins when it is confident. If it isn't, or it lands on a
-    non-target language from very sparse lyric text, word hints are checked again
-    before giving up. Anything that still is not en/es is returned as-is and is
-    filtered out of the index later.
+    There is no allow-list any more: every language is indexable. The label is
+    written to Atlas/Qdrant payloads and surfaced in stats, but never gates a
+    commit.
     """
     raw = TIMESTAMP_RE.sub(" ", text or "")
     raw = LRC_META_RE.sub(" ", raw)
-    raw = re.sub(r"<[^>]+>", " ", raw)
-
-    # Script veto: a lyric dominated by CJK/Cyrillic/Arabic/etc. is not en/es,
-    # even if a few romanised words fool langdetect. Check before stripping
-    # non-Latin characters below.
-    non_latin = len(NON_LATIN_RE.findall(raw))
-    if non_latin >= 10 and non_latin / max(len(raw), 1) >= 0.12:
-        return "non-latin"
-
-    plain = re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ' ]", " ", raw)
-    plain = re.sub(r"\s+", " ", plain).strip()
-    if len(plain) < 8:
+    raw = re.sub(r"<[^>]+>", " ", raw).strip()
+    if len(raw) < 8:
         return "unknown"
-
     try:
         from langdetect import detect_langs
 
-        ranked = detect_langs(plain)
+        ranked = detect_langs(raw)
     except Exception:
         ranked = []
+    if not ranked:
+        return "unknown"
+    return ranked[0].lang
 
-    if ranked:
-        top = ranked[0]
-        if top.lang in ALLOWED_LANGUAGES:
-            return top.lang
-        if top.prob >= 0.90:
-            return top.lang
-
-    words = plain.lower().split()
-    en_hits = sum(1 for w in words if w in ENGLISH_HINTS)
-    es_hits = sum(1 for w in words if w in SPANISH_HINTS)
-    accents = sum(1 for ch in plain if ch in "¿¡ñÑáéíóúÁÉÍÓÚüÜ")
-
-    if es_hits or accents >= 2:
-        if es_hits >= 2 and es_hits >= en_hits:
-            return "es"
-    if en_hits >= 2 and en_hits > es_hits:
-        return "en"
-    if ranked:
-        return ranked[0].lang
-    return "unknown"
 
 
 def scrape_song(video_id: str) -> Dict[str, Any]:
@@ -476,7 +473,7 @@ def build_stash_index(songs: List[Dict[str, Any]]) -> Dict[str, Any]:
     index: Dict[str, Dict[str, List[int]]] = {}
     tokens = 0
     for doc, song in enumerate(songs):
-        words = normalize_lyrics(song["lyrics"], song["language"])
+        words = lyrics_terms(song["lyrics"], song["language"])
         tokens += len(words)
         for pos, word in enumerate(words):
             index.setdefault(word, {}).setdefault(str(doc), []).append(pos + 1)
@@ -492,11 +489,24 @@ def remove_stash(batch_id: str) -> None:
     STORE.stash_delete(batch_id)
 
 
+def _token_set(text: str) -> set:
+    """Term set for the title/artist Jaccard signals.
+
+    With the Qwen3 tokenizer loaded this is the model's subword set; otherwise it
+    degrades to the legacy whitespace tokens. Only titles and artists use this.
+    """
+    if qwen_tokenizer.available():
+        terms = qwen_tokenizer.token_set(text)
+        if terms:
+            return terms
+    return set((text or "").split())
+
+
 def build_index(songs: List[Dict[str, Any]]):
     names = [normalize_name(s["track"]) for s in songs]
     artists = [normalize_artist(s["artist"]) for s in songs]
     langs = [normalize_lang(s["language"]) for s in songs]
-    tokens = [normalize_lyrics(s["lyrics"], s["language"]) for s in songs]
+    tokens = [lyrics_terms(s["lyrics"], s["language"]) for s in songs]
 
     index: Dict[str, Dict[str, List[int]]] = {}
     for doc, words in enumerate(tokens):
@@ -531,30 +541,28 @@ def build_index(songs: List[Dict[str, Any]]):
 
     n = len(songs)
 
-    def jaccard(a: str, b: str) -> float:
-        sa, sb = set(a.split()), set(b.split())
-        if not sa and not sb:
+    def jaccard(left: set, right: set) -> float:
+        if not left and not right:
             return 1.0
-        if not sa or not sb:
+        if not left or not right:
             return 0.0
-        return len(sa & sb) / len(sa | sb)
+        return len(left & right) / len(left | right)
 
+    # Jaccard is scoped to the title and artist signals only.
+    name_sets = [_token_set(name) for name in names]
+    artist_sets = [_token_set(artist) for artist in artists]
     m_name = np.zeros((n, n), dtype=np.float32)
     m_artist = np.zeros((n, n), dtype=np.float32)
-    m_lang = np.zeros((n, n), dtype=np.float32)
     for i in range(n):
         for j in range(n):
-            m_name[i, j] = jaccard(names[i], names[j])
-            m_artist[i, j] = jaccard(artists[i], artists[j])
-            m_lang[i, j] = (
-                1.0 if langs[i] == langs[j] and langs[i] not in ("", "unknown") else 0.0
-            )
+            m_name[i, j] = jaccard(name_sets[i], name_sets[j])
+            m_artist[i, j] = jaccard(artist_sets[i], artist_sets[j])
 
     m_lyrics = tfidf_unit.T @ tfidf_unit
+
     unified = (
         WEIGHTS["name"] * m_name
         + WEIGHTS["artist"] * m_artist
-        + WEIGHTS["lang"] * m_lang
         + WEIGHTS["lyrics"] * m_lyrics
     )
     peak = unified.max() if unified.size else 0.0
@@ -564,19 +572,21 @@ def build_index(songs: List[Dict[str, Any]]):
     matrices = {
         "name": m_name,
         "artist": m_artist,
-        "language": m_lang,
         "lyrics": m_lyrics,
         "unified": unified,
     }
 
     build = {
         "weights": WEIGHTS,
-        "vocabulary_size": len(vocab),
+        "jaccard_scope": JACCARD_SCOPE,        "vocabulary_size": len(vocab),
         "inverted_terms": len(index),
         "songs_indexed": n,
         "lyrics_tokens": int(sum(len(t) for t in tokens)),
         "languages": {},
         "backends": {},
+        "tokenizer": qwen_tokenizer.TOKENIZER_ID,
+        "tokenizer_backend": qwen_tokenizer.backend(),
+        "embedding_provider": EMBEDDING_PROVIDER,
     }
     for s in songs:
         build["languages"][s["language"]] = build["languages"].get(s["language"], 0) + 1
@@ -634,8 +644,6 @@ def load_state() -> None:
         if not lyrics.strip() or backend == "instrumental":
             continue
         language = detect_language(lyrics)
-        if language not in ALLOWED_LANGUAGES:
-            continue
         songs.append(
             {
                 "video_id": s.get("video_id", ""),
@@ -676,7 +684,11 @@ def load_state() -> None:
         # a subset, and deleting everything else would destroy the shared
         # catalogue (this is exactly how 661 songs disappeared). Pruning is an
         # explicit operational action, not a side effect of booting.
-        STORE.stats_put(build)
+        #
+        # A read-only serving replica must not even write the stats document:
+        # only the local indexer owns that write.
+        if not SERVE_ONLY:
+            STORE.stats_put(build)
     except Exception as exc:  # pragma: no cover
         print(f"[lirify] index reconciliation failed: {exc}", flush=True)
     global STATE_REV
@@ -875,26 +887,20 @@ async def stage_index(job_id: str, url: str, limit: Optional[int]):
                     has_lyrics=True,
                 )
 
-    # Commit rules: lyrics must exist and the language must be English or Spanish.
+    # Commit rule: lyrics must exist. Every language is indexable.
     with_lyrics = [s for s in songs if s["lyrics"].strip()]
     no_lyrics = [s for s in songs if not s["lyrics"].strip()]
-    eligible = [s for s in with_lyrics if s["language"] in ALLOWED_LANGUAGES]
-    language_skipped = [
-        s for s in with_lyrics if s["language"] not in ALLOWED_LANGUAGES
-    ]
+    eligible = with_lyrics
     for song in no_lyrics:
         await asyncio.to_thread(record_failed, song)
     for song in eligible:
         await asyncio.to_thread(resolve_failed, song["video_id"])
-    skipped = no_lyrics + language_skipped
     await _emit(
         job_id,
         "filtered",
         kept=len(eligible),
-        skipped=len(skipped),
+        skipped=len(no_lyrics),
         no_lyrics=len(no_lyrics),
-        language_skipped=len(language_skipped),
-        allowed_languages=sorted(ALLOWED_LANGUAGES),
         skipped_songs=[
             {
                 "video_id": s["video_id"],
@@ -902,18 +908,16 @@ async def stage_index(job_id: str, url: str, limit: Optional[int]):
                 "artist": s["artist"],
                 "language": s.get("language", "unknown"),
             }
-            for s in skipped[:50]
+            for s in no_lyrics[:50]
         ],
     )
     if not eligible:
-        reason = "no lyrics" if no_lyrics else "language not en/es"
-        JOBS[job_id].update(status="skipped", stage="filter", reason=reason)
+        JOBS[job_id].update(status="skipped", stage="filter", reason="no lyrics")
         await _emit(
             job_id,
             "skipped",
-            reason=f"No songs passed the filter ({reason})",
-            skipped=len(skipped),
-            language_skipped=len(language_skipped),
+            reason="No songs with lyrics",
+            skipped=len(no_lyrics),
         )
         return None
 
@@ -967,10 +971,7 @@ async def stage_matrix(batch: Dict[str, Any]) -> None:
                     continue
                 if not song.get("lyrics", "").strip():
                     continue
-                language = detect_language(song["lyrics"])
-                song["language"] = language
-                if language not in ALLOWED_LANGUAGES:
-                    continue
+                song["language"] = detect_language(song["lyrics"])
                 seen.add(video_id)
                 combined.append(song)
             added = max(len(combined) - len(previous), 0)
@@ -1026,6 +1027,14 @@ async def stage_matrix(batch: Dict[str, Any]) -> None:
             # document always describes the whole index.
             await asyncio.to_thread(persist, batch["songs"])
             await asyncio.to_thread(remove_stash, job_id)
+
+        # Local-only projections run after the lock: the cloud databases are
+        # already consistent, so a slow vocabulary rewrite must not hold commits.
+        for hook in list(COMMIT_HOOKS):
+            try:
+                await asyncio.to_thread(hook, combined)
+            except Exception as exc:  # pragma: no cover - local disk problem
+                print(f"[lirify] commit hook failed: {exc}", flush=True)
 
         JOBS[job_id].update(status="committed", stage="commit", stats=build, added=added)
         await _emit(
@@ -1286,30 +1295,15 @@ async def retry_failed_songs() -> Dict[str, int]:
             entry.get("duration"),
         )
         if text:
-            language = detect_language(text)
             song = {
                 "video_id": entry["video_id"],
                 "title": entry.get("title", ""),
                 "artist": entry.get("artist", ""),
                 "track": entry.get("title", ""),
-                "language": language,
+                "language": detect_language(text),
                 "lyrics": text,
                 "backend": backend,
             }
-            if language not in ALLOWED_LANGUAGES:
-                # Lyrics exist but the second filter rejects the language.
-                await asyncio.to_thread(resolve_failed, entry["video_id"])
-                await _emit(
-                    job_id,
-                    "language_skipped",
-                    video_id=entry["video_id"],
-                    title=song["track"],
-                    artist=song["artist"],
-                    language=language,
-                    message=f"Skipped non-en/es song ({language})",
-                )
-                await asyncio.sleep(0.3)
-                continue
             await asyncio.to_thread(save_cached_song, song)
             await asyncio.to_thread(resolve_failed, entry["video_id"])
             resolved.append(song)
@@ -1490,6 +1484,14 @@ async def start_workers() -> None:
         except Exception as exc:  # pragma: no cover - port/bind problems
             GRPC_ERROR = f"{type(exc).__name__}: {exc}"
             print(f"[lirify] gRPC server failed to start: {GRPC_ERROR}", flush=True)
+    if SERVE_ONLY:
+        # A serving replica reloads when the shared revision moves, and nothing
+        # else: no scraper, no matrix worker, no retry pass, no Qdrant backfill.
+        # Writing the index is the local indexer's job.
+        if not WORKERS:
+            WORKERS.append(asyncio.create_task(index_refresh_worker()))
+        print("[lirify] SERVE_ONLY=true: indexing workers disabled", flush=True)
+        return
     if not WORKERS:
         await recover_queue()
         WORKERS.append(asyncio.create_task(reconcile_vectors()))
@@ -1552,6 +1554,15 @@ async def ws_progress(ws: WebSocket):
             url = cmd.get("url", "")
             limit = cmd.get("limit")
             job_id = cmd.get("job_id") or f"job-{int(time.time() * 1000)}"
+            if SERVE_ONLY:
+                await ws.send_json(
+                    {
+                        "event": "error",
+                        "job_id": job_id,
+                        "message": READ_ONLY_DETAIL,
+                    }
+                )
+                continue
             if action == "extract":
                 if not url:
                     await ws.send_json({"event": "error", "job_id": job_id, "message": "url is required"})
@@ -1599,6 +1610,19 @@ async def ws_progress(ws: WebSocket):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+def _require_indexer(feature: str) -> None:
+    """Every mutating route is local-indexer only."""
+    if SERVE_ONLY:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "read_only_serving_instance",
+                "feature": feature,
+                "message": READ_ONLY_DETAIL,
+            },
+        )
+
+
 @app.get("/health")
 async def health():
     await ensure_fresh_index()
@@ -1616,6 +1640,11 @@ async def health():
         # which index revision this replica is serving.
         "version": os.environ.get("APP_VERSION", "dev"),
         "revision": STATE_REV,
+        # Role flags: a serving replica is read-only by contract.
+        "serve_only": SERVE_ONLY,
+        "mode": SERVING_MODE,
+        "embedding_provider": EMBEDDING_PROVIDER,
+        "tokenizer": qwen_tokenizer.TOKENIZER_ID if qwen_tokenizer.available() else "legacy",
     }
 
 
@@ -1630,6 +1659,7 @@ def providers():
 
 @app.post("/extract")
 def extract(inp: UrlIn):
+    _require_indexer("extract")
     ids = extract_video_ids(inp.url)
     if inp.limit:
         ids = ids[: inp.limit]
@@ -1645,6 +1675,7 @@ def extract(inp: UrlIn):
 @app.post("/index")
 async def index(inp: UrlIn):
     """Synchronous single-playlist indexing (also accumulates into the live index)."""
+    _require_indexer("index")
     job_id = f"sync-{int(time.time() * 1000)}"
     await run_index_job(job_id, inp.url, inp.limit)
     job = JOBS.get(job_id, {})
@@ -1659,6 +1690,7 @@ async def index(inp: UrlIn):
 
 @app.post("/queue")
 async def queue_playlists(inp: QueueIn):
+    _require_indexer("queue")
     urls = list(
         dict.fromkeys(
             u.strip()
@@ -1682,6 +1714,7 @@ async def queue_playlists(inp: QueueIn):
 @app.post("/retry")
 async def retry_failed():
     """Run one failed-song retry pass immediately."""
+    _require_indexer("retry")
     return await retry_failed_songs()
 
 
@@ -1755,7 +1788,8 @@ def stats():
         "backends": build.get("backends", {}),
         "weights": WEIGHTS,
         "lyrics_providers": [name for name, _ in LYRICS_PROVIDERS],
-        "allowed_languages": sorted(ALLOWED_LANGUAGES),
+        "allowed_languages": [],
+        "jaccard_scope": JACCARD_SCOPE,
         "queue": {
             "playlist_pending": PLAYLIST_QUEUE.qsize(),
             "matrix_pending": MATRIX_QUEUE.qsize(),
@@ -1786,6 +1820,14 @@ def stats():
             STATE.get("vocab", []),
             key=lambda t: -len(STATE.get("index", {}).get(t, {})),
         )[:25],
+        # --- cloud/local split -------------------------------------------------
+        "serve_only": SERVE_ONLY,
+        "mode": SERVING_MODE,
+        "embedding_provider": EMBEDDING_PROVIDER,
+        "tokenizer": qwen_tokenizer.TOKENIZER_ID if qwen_tokenizer.available() else "legacy",
+        "tokenizer_backend": qwen_tokenizer.backend(),
+        "jaccard_scope": (STATE.get("build") or {}).get("jaccard_scope", JACCARD_SCOPE),
+        "read_only_detail": READ_ONLY_DETAIL if SERVE_ONLY else "",
     }
 
 
@@ -1817,7 +1859,7 @@ def _search_scores(query: str) -> np.ndarray:
         # Partially built state: return a correctly sized zero vector instead of
         # an empty one, so callers can index by song position safely.
         return np.zeros(len(STATE.get("songs") or []), dtype=np.float32)
-    q_tokens = normalize_lyrics(query, "en")
+    q_tokens = lyrics_terms(query, "en")
     q_counts = np.zeros(len(vocab), dtype=np.float32)
     pos = {term: i for i, term in enumerate(vocab)}
     for token in q_tokens:
@@ -1880,26 +1922,23 @@ def _summary(song: Dict[str, Any], score: float) -> Dict[str, Any]:
 
 
 def _meta_similarity(seed: Dict[str, Any], candidate: Dict[str, Any]) -> float:
-    """Name/artist/language share of the unified score (lyrics come from vectors)."""
+    """Title + artist Jaccard share of the unified score (lyrics come from vectors)."""
 
-    def jaccard(a: str, b: str) -> float:
-        sa, sb = set(a.split()), set(b.split())
-        if not sa and not sb:
+    def jaccard(left: set, right: set) -> float:
+        if not left and not right:
             return 1.0
-        if not sa or not sb:
+        if not left or not right:
             return 0.0
-        return len(sa & sb) / len(sa | sb)
+        return len(left & right) / len(left | right)
 
     score = WEIGHTS["name"] * jaccard(
-        normalize_name(seed.get("track", "")), normalize_name(candidate.get("track", ""))
+        _token_set(normalize_name(seed.get("track", ""))),
+        _token_set(normalize_name(candidate.get("track", ""))),
     )
     score += WEIGHTS["artist"] * jaccard(
-        normalize_artist(seed.get("artist", "")),
-        normalize_artist(candidate.get("artist", "")),
+        _token_set(normalize_artist(seed.get("artist", ""))),
+        _token_set(normalize_artist(candidate.get("artist", ""))),
     )
-    seed_lang = normalize_lang(seed.get("language", ""))
-    if seed_lang and seed_lang == normalize_lang(candidate.get("language", "")):
-        score += WEIGHTS["lang"]
     return score
 
 
@@ -2007,15 +2046,33 @@ def job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-app.include_router(
-    build_bot_router(
-        enqueue=enqueue_playlist,
-        get_job=job_snapshot,
-        store=STORE,
-        rate_limit=int(os.environ.get("BOT_RATE_LIMIT", "30")),
-        rate_window=int(os.environ.get("BOT_RATE_WINDOW_SECONDS", "3600")),
+if SERVE_ONLY:
+    # The bot ingestion router is not mounted at all: there is no queue to write
+    # to on a serving replica. Keep a read-only health probe for monitors and a
+    # stable 403 for every write path so an old agent gets a clear answer.
+    @app.api_route(
+        "/api/v1/bot/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     )
-)
+    async def bot_read_only(path: str):
+        if path == "health":
+            return {
+                "status": "ok",
+                "mode": SERVING_MODE,
+                "serve_only": True,
+                "message": "Bot ingestion is handled by the local-indexer stack.",
+            }
+        _require_indexer(f"/api/v1/bot/{path}")
+else:
+    app.include_router(
+        build_bot_router(
+            enqueue=enqueue_playlist,
+            get_job=job_snapshot,
+            store=STORE,
+            rate_limit=int(os.environ.get("BOT_RATE_LIMIT", "30")),
+            rate_window=int(os.environ.get("BOT_RATE_WINDOW_SECONDS", "3600")),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -29,6 +29,11 @@ type Config struct {
 	PlayerURL    string
 	CallTimeout  time.Duration
 	WatchSeconds int32
+	// Mode is "readonly" (Cloud Run serving dashboard) or "local" (laptop
+	// indexer dashboard). Only local mode exposes write endpoints and controls;
+	// the cloud binary answers 403 to every mutating route.
+	Mode      string
+	LocalMode bool
 }
 
 func env(key, fallback string) string {
@@ -39,6 +44,16 @@ func env(key, fallback string) string {
 }
 
 func loadConfig() (Config, error) {
+	mode := strings.ToLower(strings.TrimSpace(env("DASHBOARD_MODE", "readonly")))
+	if mode != "local" && mode != "indexer" && mode != "readonly" && mode != "serving" {
+		mode = "readonly"
+	}
+	local := mode == "local" || mode == "indexer"
+	if local {
+		mode = "local"
+	} else {
+		mode = "readonly"
+	}
 	cfg := Config{
 		Port:         env("PORT", "8080"),
 		GRPCTarget:   strings.TrimSpace(os.Getenv("GRPC_TARGET")),
@@ -46,6 +61,8 @@ func loadConfig() (Config, error) {
 		PlayerURL:    env("PUBLIC_PLAYER_URL", "https://lirify.joscart.win"),
 		CallTimeout:  20 * time.Second,
 		WatchSeconds: 5,
+		Mode:         mode,
+		LocalMode:    local,
 	}
 
 	if raw := os.Getenv("GRPC_TIMEOUT_SECONDS"); raw != "" {
@@ -118,14 +135,20 @@ func dialBackend(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{conn: conn, api: lirifypb.NewLirifyServiceClient(conn), cfg: cfg}, nil
+	return &Client{
+		conn:    conn,
+		api:     lirifypb.NewLirifyServiceClient(conn),
+		indexer: lirifypb.NewLirifyIndexerServiceClient(conn),
+		cfg:     cfg,
+	}, nil
 }
 
 // Client wraps the generated stub with the shared per-call timeout.
 type Client struct {
-	conn *grpc.ClientConn
-	api  lirifypb.LirifyServiceClient
-	cfg  Config
+	conn    *grpc.ClientConn
+	api     lirifypb.LirifyServiceClient
+	indexer lirifypb.LirifyIndexerServiceClient
+	cfg     Config
 }
 
 func (c *Client) Close() error { return c.conn.Close() }

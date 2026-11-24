@@ -12,11 +12,18 @@ license: MIT
 
 # Lirify playlist indexer
 
+> **Retired for the cloud deployment.** Lirify is now split: Cloud Run serves a
+> read-only index and `python-backend` returns `403`/`UNIMPLEMENTED` for every
+> ingestion route. Indexing runs on the laptop via the `local-indexer` gRPC stack
+> and its dashboard (`http://localhost:8090`); there is no public HTTP bot API
+> unless you run an API yourself with `SERVE_ONLY=false`. The CLI/tool adapters
+> below still describe the retired HTTP surface and are kept for reference.
+
 Turn a **public YouTube playlist** into indexed, searchable Lirify tracks.
 
 Lirify is a lyrics-first music index: `python-backend` downloads playlist
-metadata, resolves lyrics from a provider chain, keeps only English/Spanish
-tracks that actually have lyrics, and commits them to MongoDB Atlas + Qdrant
+metadata, resolves lyrics from a provider chain, keeps tracks that actually have
+lyrics (any language), and commits them to MongoDB Atlas + Qdrant
 Cloud. This skill is the supported machine entry point — it never touches a
 database, only the HTTP bot API.
 
@@ -201,8 +208,9 @@ Other rules:
 
 - Indexing is **accumulative**: a playlist adds new tracks, it never resets the
   library. Duplicate tracks are skipped and reported as `skipped`.
-- Only tracks with non-empty lyrics and `language in {en, es}` are committed.
-  Others are counted in the job's skip statistics, not treated as errors.
+- Only tracks with non-empty lyrics are committed. Any language is indexable;
+  tracks without lyrics are counted in the job's skip statistics, not treated as
+  errors.
 - `MAX_INDEXED_SONGS` (default 1000) is a capacity guard for the 512 MiB Cloud Run
   container. A batch that would exceed it fails with `Index capacity guard` and
   commits nothing. `-1` disables the guard (local compose with enough RAM).

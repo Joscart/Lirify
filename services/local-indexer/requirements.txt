@@ -1,0 +1,6 @@
+# Extra dependencies for the laptop indexer. The serving image does not install
+# these: it never tokenises with Qwen3 and never embeds through llama.cpp.
+# `tokenizers` loads the exact Qwen/Qwen3-Embedding-0.6B tokenizer.json that the
+# local stack mounts at QWEN3_TOKENIZER_PATH.
+tokenizers>=0.15,<1
+huggingface_hub>=0.23,<2

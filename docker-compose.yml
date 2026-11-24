@@ -17,6 +17,10 @@ services:
     # Single source of truth: MONGODB_URI / QDRANT_URL / limits, all from .env.
     env_file:
       - .env
+    environment:
+      # The compose api is the read-only serving replica. Indexing lives in the
+      # local-indexer stack (docker-compose.local-indexer.yml).
+      SERVE_ONLY: "true"
     ports:
       - "8000:8080"    # REST + gRPC h2c behind the in-container mux
       - "50051:50051"  # direct gRPC, handy for grpcurl
@@ -39,6 +43,7 @@ services:
       GRPC_TLS: "false"
       PYTHON_BACKEND_URL: http://api:8080
       PUBLIC_PLAYER_URL: https://${LIRIFY_DOMAIN}
+      DASHBOARD_MODE: readonly
     ports:
       - "8080:8080"
     depends_on:

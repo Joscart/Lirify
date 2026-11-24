@@ -1,12 +1,16 @@
 # MongoDB schema
 
-`python-backend` is the only writer. Documents are Mongo-native (`_id`) with
+`local-indexer` (`SERVE_ONLY=false`) is the only writer. The Cloud Run
+`python-backend` runs `SERVE_ONLY=true`: it reads these collections and refuses
+every index write at the `store.py` boundary (resolved media durations remain an
+allowed player-metadata write). Documents are Mongo-native (`_id`) with
 camelCase fields, `schemaVersion` and `createdAt`/`updatedAt` timestamps, so the
 same collections can be modelled by Mongoose without adapters.
 
 `services/api/app/store.py` creates the collections, `$jsonSchema` validators
-(`validationLevel: moderate`, `validationAction: warn`) and indexes on boot, so a
-fresh Atlas M0 cluster needs no manual setup.
+(`validationLevel: moderate`, `validationAction: warn`) and indexes on boot when
+it is not read-only, so a fresh Atlas M0 cluster needs no manual setup: the first
+`local-indexer` start creates them.
 
 ```js
 // docs/mongo/lirify.models.js — reference Mongoose models (not used at runtime)
@@ -19,7 +23,7 @@ const Song = mongoose.model("Song", new mongoose.Schema({
   title:         { type: String, required: true },   // normalised track title
   youtubeTitle:  { type: String, default: "" },
   artist:        { type: String, default: "" },
-  language:      { type: String, required: true, enum: ["en", "es"] },
+  language:      { type: String, required: true },   // best-effort label; any language indexed
   lyrics:        { type: String, required: true },
   backend:       { type: String, default: "" },      // lyrics provider that resolved it
   duration:      { type: Number, default: null },
@@ -126,7 +130,8 @@ transient. An M0 cluster is comfortably large for several thousand tracks.
 
 ```json
 {
-  "weights": {"name": 0.1, "artist": 0.05, "lang": 0.05, "lyrics": 0.8},
+  "weights": {"name": 0.1, "artist": 0.05, "lyrics": 0.85},
+  "jaccard_scope": "name+artist",
   "vocabulary_size": 18234,
   "inverted_terms": 18234,
   "songs_indexed": 412,

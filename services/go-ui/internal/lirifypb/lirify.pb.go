@@ -2,13 +2,25 @@
 //
 // Single source of truth for every service boundary:
 //
-//   astro-webui  (lirify.joscart.win)        -> Search / Recommend / GetTrack /
+//   CLOUD (read-only serving stack, three services)
+//     astro-webui  (lirify.joscart.win)      -> Search / Recommend / GetTrack /
 //                                               GetLyrics / ListTracks / Stream
-//   go-webui     (index.<domain>)            -> IndexPlaylist / QueuePlaylists /
-//                                               GetJob / GetIndexStats / WatchIndexStats
-//   external AI bot (HTTP/JSON gateway)      -> IndexPlaylistFromBot
+//     go-webui     (index.<domain>)          -> GetIndexStats / WatchIndexStats /
+//                                               GetJob (read-only dashboard)
+//     python-backend (SERVE_ONLY=true)       -> serves committed state only;
+//                                               every indexing RPC answers
+//                                               UNIMPLEMENTED
 //
-// python-backend is the only process that owns MongoDB Atlas and Qdrant Cloud.
+//   LOCAL (laptop indexing stack)
+//     local-ui     (dashboard, DASHBOARD_MODE=local)
+//                                            -> LirifyService (read + index RPCs)
+//                                            -> LirifyIndexerService (publish,
+//                                               local vocabulary + inverted index)
+//     local-indexer (SERVE_ONLY=false)       -> full indexing pipeline backed by
+//                                               llama.cpp Qwen3-Embedding-0.6B
+//
+// local-indexer is the only writer of MongoDB Atlas and Qdrant Cloud. The cloud
+// python-backend mounts them read-only and never scrapes, embeds or commits.
 // Neither web UI ever dials a database.
 //
 // Code generation (see scripts/gen_proto.sh):
@@ -1533,8 +1545,17 @@ type IndexStats struct {
 	TracksStore       string                 `protobuf:"bytes,19,opt,name=tracks_store,json=tracksStore,proto3" json:"tracks_store,omitempty"`    // mongodb | memory
 	VectorsStore      string                 `protobuf:"bytes,20,opt,name=vectors_store,json=vectorsStore,proto3" json:"vectors_store,omitempty"` // qdrant | none
 	MaxIndexedSongs   int32                  `protobuf:"varint,21,opt,name=max_indexed_songs,json=maxIndexedSongs,proto3" json:"max_indexed_songs,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// --- serving / local indexer split ---------------------------------------
+	ServeOnly            bool   `protobuf:"varint,22,opt,name=serve_only,json=serveOnly,proto3" json:"serve_only,omitempty"`                        // true on the Cloud Run serving stack
+	Mode                 string `protobuf:"bytes,23,opt,name=mode,proto3" json:"mode,omitempty"`                                                    // serve-only | indexer
+	EmbeddingProvider    string `protobuf:"bytes,24,opt,name=embedding_provider,json=embeddingProvider,proto3" json:"embedding_provider,omitempty"` // llama.cpp | hash
+	Tokenizer            string `protobuf:"bytes,25,opt,name=tokenizer,proto3" json:"tokenizer,omitempty"`                                          // e.g. Qwen/Qwen3-Embedding-0.6B
+	JaccardScope         string `protobuf:"bytes,26,opt,name=jaccard_scope,json=jaccardScope,proto3" json:"jaccard_scope,omitempty"`                // name+artist (never lyrics/language)
+	LocalVocabularyTerms int32  `protobuf:"varint,27,opt,name=local_vocabulary_terms,json=localVocabularyTerms,proto3" json:"local_vocabulary_terms,omitempty"`
+	LocalInvertedTerms   int32  `protobuf:"varint,28,opt,name=local_inverted_terms,json=localInvertedTerms,proto3" json:"local_inverted_terms,omitempty"`
+	LocalIndexDir        string `protobuf:"bytes,29,opt,name=local_index_dir,json=localIndexDir,proto3" json:"local_index_dir,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *IndexStats) Reset() {
@@ -1712,6 +1733,62 @@ func (x *IndexStats) GetMaxIndexedSongs() int32 {
 		return x.MaxIndexedSongs
 	}
 	return 0
+}
+
+func (x *IndexStats) GetServeOnly() bool {
+	if x != nil {
+		return x.ServeOnly
+	}
+	return false
+}
+
+func (x *IndexStats) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *IndexStats) GetEmbeddingProvider() string {
+	if x != nil {
+		return x.EmbeddingProvider
+	}
+	return ""
+}
+
+func (x *IndexStats) GetTokenizer() string {
+	if x != nil {
+		return x.Tokenizer
+	}
+	return ""
+}
+
+func (x *IndexStats) GetJaccardScope() string {
+	if x != nil {
+		return x.JaccardScope
+	}
+	return ""
+}
+
+func (x *IndexStats) GetLocalVocabularyTerms() int32 {
+	if x != nil {
+		return x.LocalVocabularyTerms
+	}
+	return 0
+}
+
+func (x *IndexStats) GetLocalInvertedTerms() int32 {
+	if x != nil {
+		return x.LocalInvertedTerms
+	}
+	return 0
+}
+
+func (x *IndexStats) GetLocalIndexDir() string {
+	if x != nil {
+		return x.LocalIndexDir
+	}
+	return ""
 }
 
 type WatchIndexStatsRequest struct {
@@ -2412,6 +2489,373 @@ func (x *IndexPlaylistFromBotResponse) GetJobStatusUrl() string {
 	return ""
 }
 
+type PublishToCloudRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Rebuild the on-disk vocabulary + inverted index from the committed songs.
+	// Default (false) means "publish only"; true is the explicit rebuild.
+	RebuildLocalIndex bool `protobuf:"varint,1,opt,name=rebuild_local_index,json=rebuildLocalIndex,proto3" json:"rebuild_local_index,omitempty"`
+	// 0 -> every committed song.
+	Limit         int32 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PublishToCloudRequest) Reset() {
+	*x = PublishToCloudRequest{}
+	mi := &file_lirify_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PublishToCloudRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PublishToCloudRequest) ProtoMessage() {}
+
+func (x *PublishToCloudRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lirify_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PublishToCloudRequest.ProtoReflect.Descriptor instead.
+func (*PublishToCloudRequest) Descriptor() ([]byte, []int) {
+	return file_lirify_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *PublishToCloudRequest) GetRebuildLocalIndex() bool {
+	if x != nil {
+		return x.RebuildLocalIndex
+	}
+	return false
+}
+
+func (x *PublishToCloudRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type PublishToCloudResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Published       bool                   `protobuf:"varint,1,opt,name=published,proto3" json:"published,omitempty"`
+	Songs           int32                  `protobuf:"varint,2,opt,name=songs,proto3" json:"songs,omitempty"`
+	Vectors         int32                  `protobuf:"varint,3,opt,name=vectors,proto3" json:"vectors,omitempty"` // points upserted into Qdrant (0 when disabled)
+	VocabularyTerms int32                  `protobuf:"varint,4,opt,name=vocabulary_terms,json=vocabularyTerms,proto3" json:"vocabulary_terms,omitempty"`
+	InvertedTerms   int32                  `protobuf:"varint,5,opt,name=inverted_terms,json=invertedTerms,proto3" json:"inverted_terms,omitempty"`
+	Directory       string                 `protobuf:"bytes,6,opt,name=directory,proto3" json:"directory,omitempty"`
+	Message         string                 `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
+	PublishedAt     int64                  `protobuf:"varint,8,opt,name=published_at,json=publishedAt,proto3" json:"published_at,omitempty"` // unix seconds
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *PublishToCloudResponse) Reset() {
+	*x = PublishToCloudResponse{}
+	mi := &file_lirify_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PublishToCloudResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PublishToCloudResponse) ProtoMessage() {}
+
+func (x *PublishToCloudResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_lirify_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PublishToCloudResponse.ProtoReflect.Descriptor instead.
+func (*PublishToCloudResponse) Descriptor() ([]byte, []int) {
+	return file_lirify_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *PublishToCloudResponse) GetPublished() bool {
+	if x != nil {
+		return x.Published
+	}
+	return false
+}
+
+func (x *PublishToCloudResponse) GetSongs() int32 {
+	if x != nil {
+		return x.Songs
+	}
+	return 0
+}
+
+func (x *PublishToCloudResponse) GetVectors() int32 {
+	if x != nil {
+		return x.Vectors
+	}
+	return 0
+}
+
+func (x *PublishToCloudResponse) GetVocabularyTerms() int32 {
+	if x != nil {
+		return x.VocabularyTerms
+	}
+	return 0
+}
+
+func (x *PublishToCloudResponse) GetInvertedTerms() int32 {
+	if x != nil {
+		return x.InvertedTerms
+	}
+	return 0
+}
+
+func (x *PublishToCloudResponse) GetDirectory() string {
+	if x != nil {
+		return x.Directory
+	}
+	return ""
+}
+
+func (x *PublishToCloudResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *PublishToCloudResponse) GetPublishedAt() int64 {
+	if x != nil {
+		return x.PublishedAt
+	}
+	return 0
+}
+
+type GetLocalIndexRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLocalIndexRequest) Reset() {
+	*x = GetLocalIndexRequest{}
+	mi := &file_lirify_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLocalIndexRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLocalIndexRequest) ProtoMessage() {}
+
+func (x *GetLocalIndexRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lirify_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLocalIndexRequest.ProtoReflect.Descriptor instead.
+func (*GetLocalIndexRequest) Descriptor() ([]byte, []int) {
+	return file_lirify_proto_rawDescGZIP(), []int{39}
+}
+
+type LocalIndexInfo struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Directory          string                 `protobuf:"bytes,1,opt,name=directory,proto3" json:"directory,omitempty"`
+	Tokenizer          string                 `protobuf:"bytes,2,opt,name=tokenizer,proto3" json:"tokenizer,omitempty"`                                          // Qwen/Qwen3-Embedding-0.6B
+	TokenizerBackend   string                 `protobuf:"bytes,3,opt,name=tokenizer_backend,json=tokenizerBackend,proto3" json:"tokenizer_backend,omitempty"`    // tokenizers | transformers | fallback
+	EmbeddingProvider  string                 `protobuf:"bytes,4,opt,name=embedding_provider,json=embeddingProvider,proto3" json:"embedding_provider,omitempty"` // llama.cpp | hash
+	Documents          int32                  `protobuf:"varint,5,opt,name=documents,proto3" json:"documents,omitempty"`
+	VocabularyTerms    int32                  `protobuf:"varint,6,opt,name=vocabulary_terms,json=vocabularyTerms,proto3" json:"vocabulary_terms,omitempty"`
+	InvertedTerms      int32                  `protobuf:"varint,7,opt,name=inverted_terms,json=invertedTerms,proto3" json:"inverted_terms,omitempty"`
+	VocabularyBytes    int64                  `protobuf:"varint,8,opt,name=vocabulary_bytes,json=vocabularyBytes,proto3" json:"vocabulary_bytes,omitempty"`
+	InvertedIndexBytes int64                  `protobuf:"varint,9,opt,name=inverted_index_bytes,json=invertedIndexBytes,proto3" json:"inverted_index_bytes,omitempty"`
+	UpdatedAt          int64                  `protobuf:"varint,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"` // unix seconds
+	VocabularyPath     string                 `protobuf:"bytes,11,opt,name=vocabulary_path,json=vocabularyPath,proto3" json:"vocabulary_path,omitempty"`
+	InvertedIndexPath  string                 `protobuf:"bytes,12,opt,name=inverted_index_path,json=invertedIndexPath,proto3" json:"inverted_index_path,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *LocalIndexInfo) Reset() {
+	*x = LocalIndexInfo{}
+	mi := &file_lirify_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LocalIndexInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LocalIndexInfo) ProtoMessage() {}
+
+func (x *LocalIndexInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_lirify_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LocalIndexInfo.ProtoReflect.Descriptor instead.
+func (*LocalIndexInfo) Descriptor() ([]byte, []int) {
+	return file_lirify_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *LocalIndexInfo) GetDirectory() string {
+	if x != nil {
+		return x.Directory
+	}
+	return ""
+}
+
+func (x *LocalIndexInfo) GetTokenizer() string {
+	if x != nil {
+		return x.Tokenizer
+	}
+	return ""
+}
+
+func (x *LocalIndexInfo) GetTokenizerBackend() string {
+	if x != nil {
+		return x.TokenizerBackend
+	}
+	return ""
+}
+
+func (x *LocalIndexInfo) GetEmbeddingProvider() string {
+	if x != nil {
+		return x.EmbeddingProvider
+	}
+	return ""
+}
+
+func (x *LocalIndexInfo) GetDocuments() int32 {
+	if x != nil {
+		return x.Documents
+	}
+	return 0
+}
+
+func (x *LocalIndexInfo) GetVocabularyTerms() int32 {
+	if x != nil {
+		return x.VocabularyTerms
+	}
+	return 0
+}
+
+func (x *LocalIndexInfo) GetInvertedTerms() int32 {
+	if x != nil {
+		return x.InvertedTerms
+	}
+	return 0
+}
+
+func (x *LocalIndexInfo) GetVocabularyBytes() int64 {
+	if x != nil {
+		return x.VocabularyBytes
+	}
+	return 0
+}
+
+func (x *LocalIndexInfo) GetInvertedIndexBytes() int64 {
+	if x != nil {
+		return x.InvertedIndexBytes
+	}
+	return 0
+}
+
+func (x *LocalIndexInfo) GetUpdatedAt() int64 {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return 0
+}
+
+func (x *LocalIndexInfo) GetVocabularyPath() string {
+	if x != nil {
+		return x.VocabularyPath
+	}
+	return ""
+}
+
+func (x *LocalIndexInfo) GetInvertedIndexPath() string {
+	if x != nil {
+		return x.InvertedIndexPath
+	}
+	return ""
+}
+
+type GetLocalIndexResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Info          *LocalIndexInfo        `protobuf:"bytes,1,opt,name=info,proto3" json:"info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLocalIndexResponse) Reset() {
+	*x = GetLocalIndexResponse{}
+	mi := &file_lirify_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLocalIndexResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLocalIndexResponse) ProtoMessage() {}
+
+func (x *GetLocalIndexResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_lirify_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLocalIndexResponse.ProtoReflect.Descriptor instead.
+func (*GetLocalIndexResponse) Descriptor() ([]byte, []int) {
+	return file_lirify_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *GetLocalIndexResponse) GetInfo() *LocalIndexInfo {
+	if x != nil {
+		return x.Info
+	}
+	return nil
+}
+
 var File_lirify_proto protoreflect.FileDescriptor
 
 const file_lirify_proto_rawDesc = "" +
@@ -2523,7 +2967,8 @@ const file_lirify_proto_rawDesc = "" +
 	"\tvideo_ids\x18\x02 \x03(\tR\bvideoIds\"2\n" +
 	"\x0eGetJobResponse\x12 \n" +
 	"\x03job\x18\x01 \x01(\v2\x0e.lirify.v1.JobR\x03job\"\x16\n" +
-	"\x14GetIndexStatsRequest\"\xa7\b\n" +
+	"\x14GetIndexStatsRequest\"\xdc\n" +
+	"\n" +
 	"\n" +
 	"IndexStats\x12#\n" +
 	"\rindexed_songs\x18\x01 \x01(\x05R\findexedSongs\x12\x1b\n" +
@@ -2547,7 +2992,16 @@ const file_lirify_proto_rawDesc = "" +
 	"\tstateless\x18\x12 \x01(\bR\tstateless\x12!\n" +
 	"\ftracks_store\x18\x13 \x01(\tR\vtracksStore\x12#\n" +
 	"\rvectors_store\x18\x14 \x01(\tR\fvectorsStore\x12*\n" +
-	"\x11max_indexed_songs\x18\x15 \x01(\x05R\x0fmaxIndexedSongs\x1a<\n" +
+	"\x11max_indexed_songs\x18\x15 \x01(\x05R\x0fmaxIndexedSongs\x12\x1d\n" +
+	"\n" +
+	"serve_only\x18\x16 \x01(\bR\tserveOnly\x12\x12\n" +
+	"\x04mode\x18\x17 \x01(\tR\x04mode\x12-\n" +
+	"\x12embedding_provider\x18\x18 \x01(\tR\x11embeddingProvider\x12\x1c\n" +
+	"\ttokenizer\x18\x19 \x01(\tR\ttokenizer\x12#\n" +
+	"\rjaccard_scope\x18\x1a \x01(\tR\fjaccardScope\x124\n" +
+	"\x16local_vocabulary_terms\x18\x1b \x01(\x05R\x14localVocabularyTerms\x120\n" +
+	"\x14local_inverted_terms\x18\x1c \x01(\x05R\x12localInvertedTerms\x12&\n" +
+	"\x0flocal_index_dir\x18\x1d \x01(\tR\rlocalIndexDir\x1a<\n" +
 	"\x0eLanguagesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\x1a;\n" +
@@ -2609,7 +3063,37 @@ const file_lirify_proto_rawDesc = "" +
 	"\x1cIndexPlaylistFromBotResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12 \n" +
 	"\x03job\x18\x02 \x01(\v2\x0e.lirify.v1.JobR\x03job\x12$\n" +
-	"\x0ejob_status_url\x18\x03 \x01(\tR\fjobStatusUrl2\xd9\t\n" +
+	"\x0ejob_status_url\x18\x03 \x01(\tR\fjobStatusUrl\"]\n" +
+	"\x15PublishToCloudRequest\x12.\n" +
+	"\x13rebuild_local_index\x18\x01 \x01(\bR\x11rebuildLocalIndex\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\"\x93\x02\n" +
+	"\x16PublishToCloudResponse\x12\x1c\n" +
+	"\tpublished\x18\x01 \x01(\bR\tpublished\x12\x14\n" +
+	"\x05songs\x18\x02 \x01(\x05R\x05songs\x12\x18\n" +
+	"\avectors\x18\x03 \x01(\x05R\avectors\x12)\n" +
+	"\x10vocabulary_terms\x18\x04 \x01(\x05R\x0fvocabularyTerms\x12%\n" +
+	"\x0einverted_terms\x18\x05 \x01(\x05R\rinvertedTerms\x12\x1c\n" +
+	"\tdirectory\x18\x06 \x01(\tR\tdirectory\x12\x18\n" +
+	"\amessage\x18\a \x01(\tR\amessage\x12!\n" +
+	"\fpublished_at\x18\b \x01(\x03R\vpublishedAt\"\x16\n" +
+	"\x14GetLocalIndexRequest\"\xed\x03\n" +
+	"\x0eLocalIndexInfo\x12\x1c\n" +
+	"\tdirectory\x18\x01 \x01(\tR\tdirectory\x12\x1c\n" +
+	"\ttokenizer\x18\x02 \x01(\tR\ttokenizer\x12+\n" +
+	"\x11tokenizer_backend\x18\x03 \x01(\tR\x10tokenizerBackend\x12-\n" +
+	"\x12embedding_provider\x18\x04 \x01(\tR\x11embeddingProvider\x12\x1c\n" +
+	"\tdocuments\x18\x05 \x01(\x05R\tdocuments\x12)\n" +
+	"\x10vocabulary_terms\x18\x06 \x01(\x05R\x0fvocabularyTerms\x12%\n" +
+	"\x0einverted_terms\x18\a \x01(\x05R\rinvertedTerms\x12)\n" +
+	"\x10vocabulary_bytes\x18\b \x01(\x03R\x0fvocabularyBytes\x120\n" +
+	"\x14inverted_index_bytes\x18\t \x01(\x03R\x12invertedIndexBytes\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\n" +
+	" \x01(\x03R\tupdatedAt\x12'\n" +
+	"\x0fvocabulary_path\x18\v \x01(\tR\x0evocabularyPath\x12.\n" +
+	"\x13inverted_index_path\x18\f \x01(\tR\x11invertedIndexPath\"F\n" +
+	"\x15GetLocalIndexResponse\x12-\n" +
+	"\x04info\x18\x01 \x01(\v2\x19.lirify.v1.LocalIndexInfoR\x04info2\xd9\t\n" +
 	"\rLirifyService\x12=\n" +
 	"\x06Search\x12\x18.lirify.v1.SearchRequest\x1a\x19.lirify.v1.SearchResponse\x12F\n" +
 	"\tRecommend\x12\x1b.lirify.v1.RecommendRequest\x1a\x1c.lirify.v1.RecommendResponse\x12C\n" +
@@ -2627,7 +3111,10 @@ const file_lirify_proto_rawDesc = "" +
 	"\x0eGetFailedSongs\x12 .lirify.v1.GetFailedSongsRequest\x1a!.lirify.v1.GetFailedSongsResponse\x12L\n" +
 	"\vRetryFailed\x12\x1d.lirify.v1.RetryFailedRequest\x1a\x1e.lirify.v1.RetryFailedResponse\x12R\n" +
 	"\rMatrixPreview\x12\x1f.lirify.v1.MatrixPreviewRequest\x1a .lirify.v1.MatrixPreviewResponse\x12g\n" +
-	"\x14IndexPlaylistFromBot\x12&.lirify.v1.IndexPlaylistFromBotRequest\x1a'.lirify.v1.IndexPlaylistFromBotResponseB)Z'lirify/go-ui/internal/lirifypb;lirifypbb\x06proto3"
+	"\x14IndexPlaylistFromBot\x12&.lirify.v1.IndexPlaylistFromBotRequest\x1a'.lirify.v1.IndexPlaylistFromBotResponse2\xc1\x01\n" +
+	"\x14LirifyIndexerService\x12U\n" +
+	"\x0ePublishToCloud\x12 .lirify.v1.PublishToCloudRequest\x1a!.lirify.v1.PublishToCloudResponse\x12R\n" +
+	"\rGetLocalIndex\x12\x1f.lirify.v1.GetLocalIndexRequest\x1a .lirify.v1.GetLocalIndexResponseB)Z'lirify/go-ui/internal/lirifypb;lirifypbb\x06proto3"
 
 var (
 	file_lirify_proto_rawDescOnce sync.Once
@@ -2641,7 +3128,7 @@ func file_lirify_proto_rawDescGZIP() []byte {
 	return file_lirify_proto_rawDescData
 }
 
-var file_lirify_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_lirify_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
 var file_lirify_proto_goTypes = []any{
 	(*Track)(nil),                        // 0: lirify.v1.Track
 	(*TrackSummary)(nil),                 // 1: lirify.v1.TrackSummary
@@ -2680,11 +3167,16 @@ var file_lirify_proto_goTypes = []any{
 	(*MatrixPreviewResponse)(nil),        // 34: lirify.v1.MatrixPreviewResponse
 	(*IndexPlaylistFromBotRequest)(nil),  // 35: lirify.v1.IndexPlaylistFromBotRequest
 	(*IndexPlaylistFromBotResponse)(nil), // 36: lirify.v1.IndexPlaylistFromBotResponse
-	nil,                                  // 37: lirify.v1.IndexStats.LanguagesEntry
-	nil,                                  // 38: lirify.v1.IndexStats.BackendsEntry
-	nil,                                  // 39: lirify.v1.IndexStats.WeightsEntry
-	nil,                                  // 40: lirify.v1.MatrixPreviewResponse.MatricesEntry
-	nil,                                  // 41: lirify.v1.MatrixPreviewResponse.WeightsEntry
+	(*PublishToCloudRequest)(nil),        // 37: lirify.v1.PublishToCloudRequest
+	(*PublishToCloudResponse)(nil),       // 38: lirify.v1.PublishToCloudResponse
+	(*GetLocalIndexRequest)(nil),         // 39: lirify.v1.GetLocalIndexRequest
+	(*LocalIndexInfo)(nil),               // 40: lirify.v1.LocalIndexInfo
+	(*GetLocalIndexResponse)(nil),        // 41: lirify.v1.GetLocalIndexResponse
+	nil,                                  // 42: lirify.v1.IndexStats.LanguagesEntry
+	nil,                                  // 43: lirify.v1.IndexStats.BackendsEntry
+	nil,                                  // 44: lirify.v1.IndexStats.WeightsEntry
+	nil,                                  // 45: lirify.v1.MatrixPreviewResponse.MatricesEntry
+	nil,                                  // 46: lirify.v1.MatrixPreviewResponse.WeightsEntry
 }
 var file_lirify_proto_depIdxs = []int32{
 	1,  // 0: lirify.v1.SearchResponse.results:type_name -> lirify.v1.TrackSummary
@@ -2694,54 +3186,59 @@ var file_lirify_proto_depIdxs = []int32{
 	11, // 4: lirify.v1.GetLyricsResponse.lines:type_name -> lirify.v1.LyricsLine
 	2,  // 5: lirify.v1.QueuePlaylistsResponse.jobs:type_name -> lirify.v1.Job
 	2,  // 6: lirify.v1.GetJobResponse.job:type_name -> lirify.v1.Job
-	37, // 7: lirify.v1.IndexStats.languages:type_name -> lirify.v1.IndexStats.LanguagesEntry
-	38, // 8: lirify.v1.IndexStats.backends:type_name -> lirify.v1.IndexStats.BackendsEntry
+	42, // 7: lirify.v1.IndexStats.languages:type_name -> lirify.v1.IndexStats.LanguagesEntry
+	43, // 8: lirify.v1.IndexStats.backends:type_name -> lirify.v1.IndexStats.BackendsEntry
 	2,  // 9: lirify.v1.IndexStats.jobs:type_name -> lirify.v1.Job
-	39, // 10: lirify.v1.IndexStats.weights:type_name -> lirify.v1.IndexStats.WeightsEntry
+	44, // 10: lirify.v1.IndexStats.weights:type_name -> lirify.v1.IndexStats.WeightsEntry
 	26, // 11: lirify.v1.GetFailedSongsResponse.failed:type_name -> lirify.v1.FailedSong
 	32, // 12: lirify.v1.MatrixPreview.rows:type_name -> lirify.v1.MatrixPreviewRow
 	1,  // 13: lirify.v1.MatrixPreviewResponse.songs:type_name -> lirify.v1.TrackSummary
-	40, // 14: lirify.v1.MatrixPreviewResponse.matrices:type_name -> lirify.v1.MatrixPreviewResponse.MatricesEntry
-	41, // 15: lirify.v1.MatrixPreviewResponse.weights:type_name -> lirify.v1.MatrixPreviewResponse.WeightsEntry
+	45, // 14: lirify.v1.MatrixPreviewResponse.matrices:type_name -> lirify.v1.MatrixPreviewResponse.MatricesEntry
+	46, // 15: lirify.v1.MatrixPreviewResponse.weights:type_name -> lirify.v1.MatrixPreviewResponse.WeightsEntry
 	2,  // 16: lirify.v1.IndexPlaylistFromBotResponse.job:type_name -> lirify.v1.Job
-	33, // 17: lirify.v1.MatrixPreviewResponse.MatricesEntry.value:type_name -> lirify.v1.MatrixPreview
-	3,  // 18: lirify.v1.LirifyService.Search:input_type -> lirify.v1.SearchRequest
-	5,  // 19: lirify.v1.LirifyService.Recommend:input_type -> lirify.v1.RecommendRequest
-	7,  // 20: lirify.v1.LirifyService.GetTrack:input_type -> lirify.v1.GetTrackRequest
-	9,  // 21: lirify.v1.LirifyService.ListTracks:input_type -> lirify.v1.ListTracksRequest
-	12, // 22: lirify.v1.LirifyService.GetLyrics:input_type -> lirify.v1.GetLyricsRequest
-	14, // 23: lirify.v1.LirifyService.Stream:input_type -> lirify.v1.StreamRequest
-	16, // 24: lirify.v1.LirifyService.IndexPlaylist:input_type -> lirify.v1.IndexPlaylistRequest
-	17, // 25: lirify.v1.LirifyService.QueuePlaylists:input_type -> lirify.v1.QueuePlaylistsRequest
-	19, // 26: lirify.v1.LirifyService.GetJob:input_type -> lirify.v1.GetJobRequest
-	20, // 27: lirify.v1.LirifyService.ExtractVideoIds:input_type -> lirify.v1.ExtractVideoIdsRequest
-	23, // 28: lirify.v1.LirifyService.GetIndexStats:input_type -> lirify.v1.GetIndexStatsRequest
-	25, // 29: lirify.v1.LirifyService.WatchIndexStats:input_type -> lirify.v1.WatchIndexStatsRequest
-	27, // 30: lirify.v1.LirifyService.GetFailedSongs:input_type -> lirify.v1.GetFailedSongsRequest
-	29, // 31: lirify.v1.LirifyService.RetryFailed:input_type -> lirify.v1.RetryFailedRequest
-	31, // 32: lirify.v1.LirifyService.MatrixPreview:input_type -> lirify.v1.MatrixPreviewRequest
-	35, // 33: lirify.v1.LirifyService.IndexPlaylistFromBot:input_type -> lirify.v1.IndexPlaylistFromBotRequest
-	4,  // 34: lirify.v1.LirifyService.Search:output_type -> lirify.v1.SearchResponse
-	6,  // 35: lirify.v1.LirifyService.Recommend:output_type -> lirify.v1.RecommendResponse
-	8,  // 36: lirify.v1.LirifyService.GetTrack:output_type -> lirify.v1.GetTrackResponse
-	10, // 37: lirify.v1.LirifyService.ListTracks:output_type -> lirify.v1.ListTracksResponse
-	13, // 38: lirify.v1.LirifyService.GetLyrics:output_type -> lirify.v1.GetLyricsResponse
-	15, // 39: lirify.v1.LirifyService.Stream:output_type -> lirify.v1.StreamResponse
-	2,  // 40: lirify.v1.LirifyService.IndexPlaylist:output_type -> lirify.v1.Job
-	18, // 41: lirify.v1.LirifyService.QueuePlaylists:output_type -> lirify.v1.QueuePlaylistsResponse
-	22, // 42: lirify.v1.LirifyService.GetJob:output_type -> lirify.v1.GetJobResponse
-	21, // 43: lirify.v1.LirifyService.ExtractVideoIds:output_type -> lirify.v1.ExtractVideoIdsResponse
-	24, // 44: lirify.v1.LirifyService.GetIndexStats:output_type -> lirify.v1.IndexStats
-	24, // 45: lirify.v1.LirifyService.WatchIndexStats:output_type -> lirify.v1.IndexStats
-	28, // 46: lirify.v1.LirifyService.GetFailedSongs:output_type -> lirify.v1.GetFailedSongsResponse
-	30, // 47: lirify.v1.LirifyService.RetryFailed:output_type -> lirify.v1.RetryFailedResponse
-	34, // 48: lirify.v1.LirifyService.MatrixPreview:output_type -> lirify.v1.MatrixPreviewResponse
-	36, // 49: lirify.v1.LirifyService.IndexPlaylistFromBot:output_type -> lirify.v1.IndexPlaylistFromBotResponse
-	34, // [34:50] is the sub-list for method output_type
-	18, // [18:34] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	40, // 17: lirify.v1.GetLocalIndexResponse.info:type_name -> lirify.v1.LocalIndexInfo
+	33, // 18: lirify.v1.MatrixPreviewResponse.MatricesEntry.value:type_name -> lirify.v1.MatrixPreview
+	3,  // 19: lirify.v1.LirifyService.Search:input_type -> lirify.v1.SearchRequest
+	5,  // 20: lirify.v1.LirifyService.Recommend:input_type -> lirify.v1.RecommendRequest
+	7,  // 21: lirify.v1.LirifyService.GetTrack:input_type -> lirify.v1.GetTrackRequest
+	9,  // 22: lirify.v1.LirifyService.ListTracks:input_type -> lirify.v1.ListTracksRequest
+	12, // 23: lirify.v1.LirifyService.GetLyrics:input_type -> lirify.v1.GetLyricsRequest
+	14, // 24: lirify.v1.LirifyService.Stream:input_type -> lirify.v1.StreamRequest
+	16, // 25: lirify.v1.LirifyService.IndexPlaylist:input_type -> lirify.v1.IndexPlaylistRequest
+	17, // 26: lirify.v1.LirifyService.QueuePlaylists:input_type -> lirify.v1.QueuePlaylistsRequest
+	19, // 27: lirify.v1.LirifyService.GetJob:input_type -> lirify.v1.GetJobRequest
+	20, // 28: lirify.v1.LirifyService.ExtractVideoIds:input_type -> lirify.v1.ExtractVideoIdsRequest
+	23, // 29: lirify.v1.LirifyService.GetIndexStats:input_type -> lirify.v1.GetIndexStatsRequest
+	25, // 30: lirify.v1.LirifyService.WatchIndexStats:input_type -> lirify.v1.WatchIndexStatsRequest
+	27, // 31: lirify.v1.LirifyService.GetFailedSongs:input_type -> lirify.v1.GetFailedSongsRequest
+	29, // 32: lirify.v1.LirifyService.RetryFailed:input_type -> lirify.v1.RetryFailedRequest
+	31, // 33: lirify.v1.LirifyService.MatrixPreview:input_type -> lirify.v1.MatrixPreviewRequest
+	35, // 34: lirify.v1.LirifyService.IndexPlaylistFromBot:input_type -> lirify.v1.IndexPlaylistFromBotRequest
+	37, // 35: lirify.v1.LirifyIndexerService.PublishToCloud:input_type -> lirify.v1.PublishToCloudRequest
+	39, // 36: lirify.v1.LirifyIndexerService.GetLocalIndex:input_type -> lirify.v1.GetLocalIndexRequest
+	4,  // 37: lirify.v1.LirifyService.Search:output_type -> lirify.v1.SearchResponse
+	6,  // 38: lirify.v1.LirifyService.Recommend:output_type -> lirify.v1.RecommendResponse
+	8,  // 39: lirify.v1.LirifyService.GetTrack:output_type -> lirify.v1.GetTrackResponse
+	10, // 40: lirify.v1.LirifyService.ListTracks:output_type -> lirify.v1.ListTracksResponse
+	13, // 41: lirify.v1.LirifyService.GetLyrics:output_type -> lirify.v1.GetLyricsResponse
+	15, // 42: lirify.v1.LirifyService.Stream:output_type -> lirify.v1.StreamResponse
+	2,  // 43: lirify.v1.LirifyService.IndexPlaylist:output_type -> lirify.v1.Job
+	18, // 44: lirify.v1.LirifyService.QueuePlaylists:output_type -> lirify.v1.QueuePlaylistsResponse
+	22, // 45: lirify.v1.LirifyService.GetJob:output_type -> lirify.v1.GetJobResponse
+	21, // 46: lirify.v1.LirifyService.ExtractVideoIds:output_type -> lirify.v1.ExtractVideoIdsResponse
+	24, // 47: lirify.v1.LirifyService.GetIndexStats:output_type -> lirify.v1.IndexStats
+	24, // 48: lirify.v1.LirifyService.WatchIndexStats:output_type -> lirify.v1.IndexStats
+	28, // 49: lirify.v1.LirifyService.GetFailedSongs:output_type -> lirify.v1.GetFailedSongsResponse
+	30, // 50: lirify.v1.LirifyService.RetryFailed:output_type -> lirify.v1.RetryFailedResponse
+	34, // 51: lirify.v1.LirifyService.MatrixPreview:output_type -> lirify.v1.MatrixPreviewResponse
+	36, // 52: lirify.v1.LirifyService.IndexPlaylistFromBot:output_type -> lirify.v1.IndexPlaylistFromBotResponse
+	38, // 53: lirify.v1.LirifyIndexerService.PublishToCloud:output_type -> lirify.v1.PublishToCloudResponse
+	41, // 54: lirify.v1.LirifyIndexerService.GetLocalIndex:output_type -> lirify.v1.GetLocalIndexResponse
+	37, // [37:55] is the sub-list for method output_type
+	19, // [19:37] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_lirify_proto_init() }
@@ -2755,9 +3252,9 @@ func file_lirify_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lirify_proto_rawDesc), len(file_lirify_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   42,
+			NumMessages:   47,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_lirify_proto_goTypes,
 		DependencyIndexes: file_lirify_proto_depIdxs,

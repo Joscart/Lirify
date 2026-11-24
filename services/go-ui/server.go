@@ -42,11 +42,29 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/cache", s.cache)
 	mux.HandleFunc("GET /api/matrices/preview", s.matrixPreview)
 	mux.HandleFunc("GET /api/events", s.events)
-	mux.HandleFunc("POST /api/extract", s.extract)
-	mux.HandleFunc("POST /api/index", s.indexPlaylist)
-	mux.HandleFunc("POST /api/queue", s.queuePlaylists)
-	mux.HandleFunc("POST /api/retry", s.retry)
+	// Mutating routes exist only for the laptop dashboard. On Cloud Run every one
+	// of them answers 403 without dialling python-backend.
+	mux.HandleFunc("POST /api/extract", s.requireLocal(s.extract))
+	mux.HandleFunc("POST /api/index", s.requireLocal(s.indexPlaylist))
+	mux.HandleFunc("POST /api/queue", s.requireLocal(s.queuePlaylists))
+	mux.HandleFunc("POST /api/retry", s.requireLocal(s.retry))
+	mux.HandleFunc("GET /api/local-index", s.requireLocal(s.localIndex))
+	mux.HandleFunc("POST /api/publish", s.requireLocal(s.publish))
 	mux.HandleFunc("GET /docs", s.docs)
+}
+
+// requireLocal guards every write/publish route with the dashboard role.
+func (s *Server) requireLocal(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.cfg.LocalMode {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"code":   "read_only_serving_dashboard",
+				"detail": "This dashboard is read-only (DASHBOARD_MODE=readonly). Indexing runs on the local-indexer stack.",
+			})
+			return
+		}
+		next(w, r)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -60,7 +78,11 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := s.tmpl.ExecuteTemplate(w, "index.html", nil); err != nil {
+	data := map[string]any{
+		"LocalMode": s.cfg.LocalMode,
+		"Mode":      s.cfg.Mode,
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
 	}
 }
@@ -72,6 +94,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
 		"service": "go-webui",
+		"mode":    s.cfg.Mode,
 		"grpc":    s.cfg.GRPCTarget,
 		"tls":     !s.cfg.Insecure,
 	})
@@ -99,6 +122,8 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		"player_url": s.cfg.PlayerURL,
 		"backend":    s.cfg.BackendURL,
 		"grpc":       s.cfg.GRPCTarget,
+		"mode":       s.cfg.Mode,
+		"local_mode": s.cfg.LocalMode,
 	})
 }
 
@@ -360,6 +385,73 @@ func (s *Server) retry(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// localIndex describes the Qwen3 vocabulary + inverted index on disk.
+func (s *Server) localIndex(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := s.client.context(r.Context())
+	defer cancel()
+	payload, err := s.client.indexer.GetLocalIndex(ctx, &lirifypb.GetLocalIndexRequest{})
+	if err != nil {
+		writeRPCError(w, err)
+		return
+	}
+	info := payload.Info
+	if info == nil {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"directory":            info.Directory,
+		"tokenizer":            info.Tokenizer,
+		"tokenizer_backend":    info.TokenizerBackend,
+		"embedding_provider":   info.EmbeddingProvider,
+		"documents":            info.Documents,
+		"vocabulary_terms":     info.VocabularyTerms,
+		"inverted_terms":       info.InvertedTerms,
+		"vocabulary_bytes":     info.VocabularyBytes,
+		"inverted_index_bytes": info.InvertedIndexBytes,
+		"updated_at":           info.UpdatedAt,
+		"vocabulary_path":      info.VocabularyPath,
+		"inverted_index_path":  info.InvertedIndexPath,
+	})
+}
+
+type publishRequest struct {
+	RebuildLocalIndex bool  `json:"rebuild_local_index"`
+	Limit             int32 `json:"limit"`
+}
+
+// publish writes the committed index through to Atlas + Qdrant and (optionally)
+// rebuilds the local Qwen3 vocabulary + inverted index.
+func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
+	var body publishRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid json"})
+			return
+		}
+	}
+	ctx, cancel := s.client.context(r.Context())
+	defer cancel()
+	payload, err := s.client.indexer.PublishToCloud(ctx, &lirifypb.PublishToCloudRequest{
+		RebuildLocalIndex: body.RebuildLocalIndex,
+		Limit:             body.Limit,
+	})
+	if err != nil {
+		writeRPCError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"published":        payload.Published,
+		"songs":            payload.Songs,
+		"vectors":          payload.Vectors,
+		"vocabulary_terms": payload.VocabularyTerms,
+		"inverted_terms":   payload.InvertedTerms,
+		"directory":        payload.Directory,
+		"message":          payload.Message,
+		"published_at":     payload.PublishedAt,
+	})
+}
+
 // ---------------------------------------------------------------------------
 // SSE fan-out
 // ---------------------------------------------------------------------------
@@ -496,7 +588,8 @@ func statsJSON(payload *lirifypb.IndexStats) map[string]any {
 		"weights":            payload.Weights,
 		"lyrics_providers":   payload.LyricsProviders,
 		"top_terms":          payload.TopTerms,
-		"allowed_languages":  []string{"en", "es"},
+		"allowed_languages":  []string{},
+		"jaccard_scope":      payload.JaccardScope,
 		"matrix_shape":       []int{total, total},
 		"matrices_available": payload.MatricesAvailable,
 		"jobs":               len(payload.Jobs),
@@ -507,8 +600,17 @@ func statsJSON(payload *lirifypb.IndexStats) map[string]any {
 			"stateless":         payload.Stateless,
 			"max_indexed_songs": payload.MaxIndexedSongs,
 		},
-		"files":        files,
-		"generated_at": payload.GeneratedAt,
+		"files":              files,
+		"generated_at":       payload.GeneratedAt,
+		"serve_only":         payload.ServeOnly,
+		"mode":               payload.Mode,
+		"embedding_provider": payload.EmbeddingProvider,
+		"tokenizer":          payload.Tokenizer,
+		"local_index": map[string]any{
+			"vocabulary_terms": payload.LocalVocabularyTerms,
+			"inverted_terms":   payload.LocalInvertedTerms,
+			"directory":        payload.LocalIndexDir,
+		},
 	}
 }
 

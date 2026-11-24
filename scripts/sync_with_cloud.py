@@ -116,6 +116,13 @@ def submit_and_wait(local_base: str, playlist: str, key: str, limit: int | None,
     job = (body or {}).get("job") or {}
     job_id = job.get("job_id")
     print(f"submit -> {status} job={job_id}")
+    if status == 403:
+        print(
+            "403: that API is a read-only serving replica (SERVE_ONLY=true). "
+            "Index from the local dashboard (http://localhost:8090) or run an API "
+            "with SERVE_ONLY=false; the local-indexer itself is gRPC-only.",
+            file=sys.stderr,
+        )
     if status not in (200, 202) or not job_id:
         print(json.dumps(body)[:400], file=sys.stderr)
         return False

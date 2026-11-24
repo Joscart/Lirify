@@ -755,3 +755,127 @@ class LirifyService(object):
             timeout,
             metadata,
             _registered_method=True)
+
+
+class LirifyIndexerServiceStub(object):
+    """Laptop-only operations. Registered by local-indexer (SERVE_ONLY=false) and
+    never by the Cloud Run serving instance.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.PublishToCloud = channel.unary_unary(
+                '/lirify.v1.LirifyIndexerService/PublishToCloud',
+                request_serializer=lirify__pb2.PublishToCloudRequest.SerializeToString,
+                response_deserializer=lirify__pb2.PublishToCloudResponse.FromString,
+                _registered_method=True)
+        self.GetLocalIndex = channel.unary_unary(
+                '/lirify.v1.LirifyIndexerService/GetLocalIndex',
+                request_serializer=lirify__pb2.GetLocalIndexRequest.SerializeToString,
+                response_deserializer=lirify__pb2.GetLocalIndexResponse.FromString,
+                _registered_method=True)
+
+
+class LirifyIndexerServiceServicer(object):
+    """Laptop-only operations. Registered by local-indexer (SERVE_ONLY=false) and
+    never by the Cloud Run serving instance.
+    """
+
+    def PublishToCloud(self, request, context):
+        """Force a write-through of the committed index to Atlas + Qdrant and
+        optionally rebuild the local Qwen3 vocabulary/inverted index files.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetLocalIndex(self, request, context):
+        """Describe the local vocabulary + inverted index (paths, sizes, counts).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_LirifyIndexerServiceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'PublishToCloud': grpc.unary_unary_rpc_method_handler(
+                    servicer.PublishToCloud,
+                    request_deserializer=lirify__pb2.PublishToCloudRequest.FromString,
+                    response_serializer=lirify__pb2.PublishToCloudResponse.SerializeToString,
+            ),
+            'GetLocalIndex': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetLocalIndex,
+                    request_deserializer=lirify__pb2.GetLocalIndexRequest.FromString,
+                    response_serializer=lirify__pb2.GetLocalIndexResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'lirify.v1.LirifyIndexerService', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('lirify.v1.LirifyIndexerService', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class LirifyIndexerService(object):
+    """Laptop-only operations. Registered by local-indexer (SERVE_ONLY=false) and
+    never by the Cloud Run serving instance.
+    """
+
+    @staticmethod
+    def PublishToCloud(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/lirify.v1.LirifyIndexerService/PublishToCloud',
+            lirify__pb2.PublishToCloudRequest.SerializeToString,
+            lirify__pb2.PublishToCloudResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetLocalIndex(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/lirify.v1.LirifyIndexerService/GetLocalIndex',
+            lirify__pb2.GetLocalIndexRequest.SerializeToString,
+            lirify__pb2.GetLocalIndexResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

@@ -25,6 +25,14 @@ export interface IndexStats {
   'tracksStore'?: (string);
   'vectorsStore'?: (string);
   'maxIndexedSongs'?: (number);
+  'serveOnly'?: (boolean);
+  'mode'?: (string);
+  'embeddingProvider'?: (string);
+  'tokenizer'?: (string);
+  'jaccardScope'?: (string);
+  'localVocabularyTerms'?: (number);
+  'localInvertedTerms'?: (number);
+  'localIndexDir'?: (string);
 }
 
 export interface IndexStats__Output {
@@ -49,4 +57,12 @@ export interface IndexStats__Output {
   'tracksStore': (string);
   'vectorsStore': (string);
   'maxIndexedSongs': (number);
+  'serveOnly': (boolean);
+  'mode': (string);
+  'embeddingProvider': (string);
+  'tokenizer': (string);
+  'jaccardScope': (string);
+  'localVocabularyTerms': (number);
+  'localInvertedTerms': (number);
+  'localIndexDir': (string);
 }

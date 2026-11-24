@@ -111,10 +111,11 @@ variable "go_max_instances" {
 variable "python_public" {
   description = <<-EOT
     Allow unauthenticated invocations of python-backend.
-    Required for the browser-facing bot API and for gRPC from the two web UIs,
-    which do not mint Google ID tokens. Writes stay protected by BOT_INGEST_API_KEY;
-    reads only expose the public lyric index. Set to false if you front the
-    service with an authenticated load balancer or add ID-token auth.
+    Required for gRPC from the two web UIs, which do not mint Google ID tokens.
+    The service is a read-only serving replica (SERVE_ONLY=true); reads only
+    expose the public lyric index and BOT_INGEST_API_KEY now guards
+    POST /admin/reload. Set to false if you front the service with an
+    authenticated load balancer or add ID-token auth.
   EOT
   type        = bool
   default     = true
@@ -147,7 +148,7 @@ variable "qdrant_api_key" {
 }
 
 variable "bot_ingest_api_key" {
-  description = "Bearer token external AI agents use for POST /api/v1/bot/index-playlist."
+  description = "Bearer token for the local/lab API write surface and for POST /admin/reload on the serving replica."
   type        = string
   sensitive   = true
 }
@@ -221,13 +222,15 @@ variable "retry_interval_seconds" {
 }
 
 variable "qdrant_vector_size" {
-  type    = number
-  default = 256
+  description = "Qdrant vector size. 1024 = Qwen3-Embedding-0.6B (local llama.cpp); 256 = legacy hash embeddings."
+  type        = number
+  default     = 1024
 }
 
 variable "qdrant_collection" {
-  type    = string
-  default = "lirify_lyrics"
+  description = "Qdrant collection. A new embedding dimension needs a new collection name."
+  type        = string
+  default     = "lirify_lyrics_qwen3"
 }
 
 variable "labels" {

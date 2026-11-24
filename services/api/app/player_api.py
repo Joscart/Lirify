@@ -895,6 +895,7 @@ def build_router(
                 fmt,
                 "-g",
                 "--no-warnings",
+                "--no-cache-dir",
                 "--no-playlist",
                 "--print",
                 "%(duration)s",

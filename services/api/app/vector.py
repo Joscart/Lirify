@@ -15,16 +15,122 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import requests
 
-DEFAULT_DIM = int(os.environ.get("QDRANT_VECTOR_SIZE", "256"))
+# --- embeddings -------------------------------------------------------------
+# The local indexer points LLAMA_EMBED_URL at llama-server (Qwen3-Embedding-0.6B,
+# GGUF). When it is unset the deterministic hashing trick keeps `docker compose`
+# and the read-only serving image working with no model at all.
+LLAMA_EMBED_URL = (os.environ.get("LLAMA_EMBED_URL") or "").strip().rstrip("/")
+EMBEDDING_PROVIDER = "llama.cpp" if LLAMA_EMBED_URL else "hash"
+LLAMA_EMBED_MODEL = (os.environ.get("LLAMA_EMBED_MODEL") or "qwen3-embedding-0.6b").strip()
+try:
+    LLAMA_EMBED_BATCH = max(1, int(os.environ.get("LLAMA_EMBED_BATCH", "8")))
+except ValueError:
+    LLAMA_EMBED_BATCH = 8
+try:
+    LLAMA_EMBED_TIMEOUT = max(5, int(os.environ.get("LLAMA_EMBED_TIMEOUT", "120")))
+except ValueError:
+    LLAMA_EMBED_TIMEOUT = 120
+# Conservative text budget: the laptop server runs with a small context so the
+# KV/compute buffers stay inside 4 GB of VRAM next to the compositor.
+try:
+    LLAMA_EMBED_MAX_CHARS = max(256, int(os.environ.get("LLAMA_EMBED_MAX_CHARS", "6000")))
+except ValueError:
+    LLAMA_EMBED_MAX_CHARS = 6000
+
+SERVE_ONLY = (os.environ.get("SERVE_ONLY", "1").strip().lower() not in {"0", "false", "no", "off"})
+
+# Qwen3-Embedding-0.6B emits 1024-dimensional vectors. Keep 256 for the hash
+# fallback so an existing collection keeps working; the local indexer uses a
+# separate collection name (see docs/ARCHITECTURE.md) for the 1024-dim model.
+DEFAULT_DIM = int(os.environ.get("QDRANT_VECTOR_SIZE", "1024" if LLAMA_EMBED_URL else "256"))
 COLLECTION = os.environ.get("QDRANT_COLLECTION", "lirify_lyrics")
 # Namespaced UUIDs are what Qdrant accepts as point ids; video ids are not UUIDs.
 _POINT_NAMESPACE = uuid.UUID("6f0a1f4e-7c2b-5c6d-9f10-1b2c3d4e5f60")
+
+
+class LlamaEmbedder:
+    """Small OpenAI-compatible client for llama.cpp's ``/v1/embeddings``.
+
+    Batches are intentionally tiny (default 8) because the target is an RTX 2050
+    with 4 GB of VRAM shared with the compositor. A failed request is logged and
+    the caller falls back to the deterministic hash vector, so indexing keeps
+    moving even if the model server is restarting.
+    """
+
+    def __init__(self, base_url: str) -> None:
+        self.base = base_url.rstrip("/")
+        self.session = requests.Session()
+        self.session.headers.update({"Content-Type": "application/json"})
+        self.dim = 0
+        self._warned = False
+
+    def embed(self, texts: List[str], batch_size: Optional[int] = None) -> List[List[float]]:
+        if not texts:
+            return []
+        size = max(1, batch_size or LLAMA_EMBED_BATCH)
+        out: List[List[float]] = []
+        for start in range(0, len(texts), size):
+            chunk = [text[:LLAMA_EMBED_MAX_CHARS] for text in texts[start : start + size]]
+            response = self.session.post(
+                f"{self.base}/v1/embeddings",
+                json={"model": LLAMA_EMBED_MODEL, "input": chunk},
+                timeout=LLAMA_EMBED_TIMEOUT,
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"llama.cpp embeddings {response.status_code}: {response.text[:300]}"
+                )
+            payload = response.json() or {}
+            data = payload.get("data")
+            if not isinstance(data, list) or len(data) != len(chunk):
+                raise RuntimeError(f"unexpected llama.cpp embeddings payload: {str(payload)[:300]}")
+            # Some servers return the rows out of order; the `index` field is the
+            # contract, so sort rather than trusting the list order.
+            rows = sorted(data, key=lambda row: int(row.get("index", 0)))
+            for row in rows:
+                vector = row.get("embedding")
+                if not isinstance(vector, list) or not vector:
+                    raise RuntimeError("llama.cpp returned an empty embedding")
+                if not self.dim:
+                    self.dim = len(vector)
+                out.append([float(value) for value in vector])
+        return out
+
+    def health(self) -> bool:
+        try:
+            response = self.session.get(f"{self.base}/health", timeout=5)
+            return response.status_code < 400
+        except requests.RequestException:
+            return False
+
+
+_LLAMA: Optional[LlamaEmbedder] = None
+_LLAMA_LOCK = threading.Lock()
+
+
+def get_llama_embedder() -> Optional[LlamaEmbedder]:
+    global _LLAMA
+    if not LLAMA_EMBED_URL:
+        return None
+    with _LLAMA_LOCK:
+        if _LLAMA is None:
+            _LLAMA = LlamaEmbedder(LLAMA_EMBED_URL)
+            print(f"[lirify] embeddings via llama.cpp at {LLAMA_EMBED_URL}", flush=True)
+        return _LLAMA
+
+
+def embedding_dim() -> int:
+    embedder = get_llama_embedder()
+    if embedder is not None and embedder.dim:
+        return embedder.dim
+    return DEFAULT_DIM
 
 
 def point_id(video_id: str) -> str:
@@ -54,15 +160,44 @@ def embed_tokens(tokens: Iterable[str], dim: int = DEFAULT_DIM) -> List[float]:
     return vector.tolist()
 
 
-def embed_lyrics(lyrics: str, dim: int = DEFAULT_DIM) -> List[float]:
+def _hash_embed_lyrics(lyrics: str, dim: int) -> List[float]:
     from main import normalize_lyrics  # local import: avoids a cycle at import time
 
     return embed_tokens(normalize_lyrics(lyrics or "", "en"), dim)
 
 
+def embed_lyrics(lyrics: str, dim: int = DEFAULT_DIM) -> List[float]:
+    """One embedding vector: llama.cpp when configured, deterministic hash else."""
+    embedder = get_llama_embedder()
+    if embedder is not None:
+        try:
+            return embedder.embed([lyrics or ""])[0]
+        except Exception as exc:  # pragma: no cover - model server hiccup
+            if not embedder._warned:
+                embedder._warned = True
+                print(
+                    f"[lirify] llama.cpp embedding failed ({exc}); using the hash fallback",
+                    flush=True,
+                )
+    return _hash_embed_lyrics(lyrics, dim)
+
+
+def embed_texts(texts: List[str]) -> List[List[float]]:
+    """Batch helper used by the local indexer's backfill/publish path."""
+    embedder = get_llama_embedder()
+    if embedder is not None:
+        try:
+            return embedder.embed(texts)
+        except Exception as exc:  # pragma: no cover
+            print(f"[lirify] llama.cpp batch failed ({exc}); hashing instead", flush=True)
+    return [_hash_embed_lyrics(text, DEFAULT_DIM) for text in texts]
+
+
+
 class VectorStore:
     backend = "none"
     dim = DEFAULT_DIM
+    read_only = SERVE_ONLY
 
     def healthy(self) -> bool:
         return False
@@ -91,6 +226,7 @@ class QdrantStore(VectorStore):
         self.api_key = api_key
         self.dim = dim
         self.collection = COLLECTION
+        self.read_only = SERVE_ONLY
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json"})
         if api_key:
@@ -140,6 +276,15 @@ class QdrantStore(VectorStore):
             return True
         existing = self._request("GET", "")
         if existing is None:
+            # A serving replica must not create collections (or anything else):
+            # only local-indexer owns Qdrant writes.
+            if self.read_only:
+                print(
+                    f"[lirify] qdrant collection {self.collection} does not exist; "
+                    "read-only serving replica will recommend from the matrix",
+                    flush=True,
+                )
+                return False
             created = self._request(
                 "PUT",
                 "",
@@ -174,18 +319,34 @@ class QdrantStore(VectorStore):
 
     # -- writes -----------------------------------------------------------
     def upsert(self, tracks: List[Dict[str, Any]]) -> int:
+        if self.read_only:
+            print("[lirify] Qdrant upsert blocked on a read-only serving replica", flush=True)
+            return 0
         if not tracks or not self.ensure():
             return 0
+        valid = [
+            track
+            for track in tracks
+            if (track.get("video_id") or "") and (track.get("lyrics") or "").strip()
+        ]
+        if not valid:
+            return 0
+        # Batch the embedding calls: llama.cpp on a 4 GB GPU benefits from the
+        # client-side batch far more than from one request per song.
+        vectors = embed_texts([track.get("lyrics") or "" for track in valid])
+        if vectors and len(vectors[0]) != self.dim:
+            raise RuntimeError(
+                f"embedding dimension {len(vectors[0])} does not match the Qdrant "
+                f"collection {self.collection!r} dimension {self.dim}; use a new "
+                "QDRANT_COLLECTION for a different embedding model"
+            )
         points = []
-        for track in tracks:
+        for track, vector in zip(valid, vectors):
             video_id = track.get("video_id") or ""
-            lyrics = track.get("lyrics") or ""
-            if not video_id or not lyrics.strip():
-                continue
             points.append(
                 {
                     "id": point_id(video_id),
-                    "vector": embed_lyrics(lyrics, self.dim),
+                    "vector": vector,
                     "payload": {
                         "video_id": video_id,
                         "title": track.get("track") or track.get("title", ""),
@@ -205,6 +366,8 @@ class QdrantStore(VectorStore):
         return written
 
     def delete(self, video_ids: List[str]) -> int:
+        if self.read_only:
+            return 0
         if not video_ids or not self.ensure():
             return 0
         ids = [point_id(v) for v in video_ids if v]

@@ -29,6 +29,24 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 SCHEMA_VERSION = 1
 
+# Serving replicas hold Atlas/Qdrant credentials but must never write to them.
+# SERVE_ONLY is shared with main.py/vector.py; store.py enforces it at the
+# boundary so a stray call fails loudly instead of mutating the catalogue.
+SERVE_ONLY = (os.environ.get("SERVE_ONLY", "1").strip().lower() not in {"0", "false", "no", "off"})
+
+
+class ReadOnlyStoreError(RuntimeError):
+    """Raised when a serving replica attempts an index write."""
+
+
+def _forbid_write(operation: str) -> None:
+    if SERVE_ONLY:
+        raise ReadOnlyStoreError(
+            f"{operation} is disabled on a read-only serving replica (SERVE_ONLY=true); "
+            "run it on the local-indexer stack"
+        )
+
+
 COLLECTIONS = {
     "songs": "songs",
     "cache": "lyrics_cache",
@@ -267,7 +285,10 @@ class MongoStore(Store):
         # not kill it: an exception here would abort module import and leave Cloud
         # Run with a container that answers 502 forever.
         try:
-            self.ensure_schema()
+            if SERVE_ONLY:
+                self.ping()
+            else:
+                self.ensure_schema()
         except Exception as exc:  # pragma: no cover - bad credentials / network
             self.init_error = f"{type(exc).__name__}: {exc}"
             print(f"[lirify] MongoDB init failed: {self.init_error}", flush=True)
@@ -352,6 +373,7 @@ class MongoStore(Store):
         return int((doc or {}).get("revision", 0))
 
     def commit_songs(self, songs: List[Dict[str, Any]], build: Dict[str, Any]) -> int:
+        _forbid_write("commit_songs")
         from pymongo import UpdateOne
 
         if not songs:
@@ -394,6 +416,7 @@ class MongoStore(Store):
         return int(result.upserted_count + result.modified_count)
 
     def prune_songs(self, keep_ids: Iterable[str]) -> int:
+        _forbid_write("prune_songs")
         keep = [v for v in keep_ids if v]
         if not keep:
             return 0
@@ -422,6 +445,7 @@ class MongoStore(Store):
         }
 
     def cache_put(self, song: Dict[str, Any]) -> None:
+        _forbid_write("cache_put")
         lyrics = (song.get("lyrics") or "").strip()
         if not lyrics:
             return
@@ -463,6 +487,7 @@ class MongoStore(Store):
         return out
 
     def failed_record(self, song: Dict[str, Any], reason: str, duration: Optional[float]) -> None:
+        _forbid_write("failed_record")
         video_id = song.get("video_id", "")
         if not video_id:
             return
@@ -484,6 +509,7 @@ class MongoStore(Store):
         )
 
     def failed_resolve(self, video_id: str) -> None:
+        _forbid_write("failed_resolve")
         self.db[COLLECTIONS["failed"]].delete_one({"videoId": video_id})
 
     def failed_count(self) -> int:
@@ -491,6 +517,7 @@ class MongoStore(Store):
 
     # -- jobs -------------------------------------------------------------
     def job_put(self, job: Dict[str, Any]) -> None:
+        _forbid_write("job_put")
         job_id = job.get("job_id")
         if not job_id:
             return
@@ -559,6 +586,7 @@ class MongoStore(Store):
 
     # -- stashes ----------------------------------------------------------
     def stash_put(self, job_id: str, songs: List[Dict[str, Any]], stash: Dict[str, Any]) -> None:
+        _forbid_write("stash_put")
         self.db[COLLECTIONS["stashes"]].replace_one(
             {"jobId": job_id},
             {
@@ -586,6 +614,7 @@ class MongoStore(Store):
         return out
 
     def stash_delete(self, job_id: str) -> None:
+        _forbid_write("stash_delete")
         self.db[COLLECTIONS["stashes"]].delete_one({"jobId": job_id})
 
     # -- stats ------------------------------------------------------------
@@ -596,6 +625,7 @@ class MongoStore(Store):
         return doc.get("build") or {}
 
     def stats_put(self, build: Dict[str, Any]) -> None:
+        _forbid_write("stats_put")
         # update_one, not replace_one: replacing the document would drop the
         # `revision` counter, so replicas could never detect a newer index.
         self.db[COLLECTIONS["stats"]].update_one(
@@ -632,6 +662,7 @@ class MongoStore(Store):
 
     # -- bot --------------------------------------------------------------
     def rate_limit_hit(self, key: str, limit: int, window_seconds: int) -> Tuple[bool, int, int]:
+        _forbid_write("rate_limit_hit")
         from pymongo import ReturnDocument
         from pymongo.errors import DuplicateKeyError
 
@@ -665,6 +696,7 @@ class MongoStore(Store):
         return doc.get("jobId") if doc else None
 
     def remember_idempotent_job(self, key: str, job_id: str, ttl_days: int = 7) -> None:
+        _forbid_write("remember_idempotent_job")
         if not key:
             return
         try:
@@ -711,6 +743,7 @@ class MemoryStore(Store):
         return len(self._songs)
 
     def commit_songs(self, songs: List[Dict[str, Any]], build: Dict[str, Any]) -> int:
+        _forbid_write("commit_songs")
         changed = 0
         for song in songs:
             video_id = song.get("video_id") or ""
@@ -735,6 +768,7 @@ class MemoryStore(Store):
         return changed
 
     def prune_songs(self, keep_ids: Iterable[str]) -> int:
+        _forbid_write("prune_songs")
         keep = set(keep_ids)
         drop = [v for v in self._songs if v not in keep]
         for video_id in drop:
@@ -751,6 +785,7 @@ class MemoryStore(Store):
         return dict(doc)
 
     def cache_put(self, song: Dict[str, Any]) -> None:
+        _forbid_write("cache_put")
         if not (song.get("lyrics") or "").strip():
             return
         self._cache[song.get("video_id", "")] = dict(song, cached_at=_now())
@@ -759,6 +794,7 @@ class MemoryStore(Store):
         return {k: dict(v) for k, v in self._failed.items()}
 
     def failed_record(self, song: Dict[str, Any], reason: str, duration: Optional[float]) -> None:
+        _forbid_write("failed_record")
         video_id = song.get("video_id", "")
         entry = self._failed.get(video_id, {})
         entry.update(
@@ -773,12 +809,14 @@ class MemoryStore(Store):
         self._failed[video_id] = entry
 
     def failed_resolve(self, video_id: str) -> None:
+        _forbid_write("failed_resolve")
         self._failed.pop(video_id, None)
 
     def failed_count(self) -> int:
         return len(self._failed)
 
     def job_put(self, job: Dict[str, Any]) -> None:
+        _forbid_write("job_put")
         job_id = job.get("job_id")
         if not job_id:
             return
@@ -806,12 +844,14 @@ class MemoryStore(Store):
         ]
 
     def stash_put(self, job_id: str, songs: List[Dict[str, Any]], stash: Dict[str, Any]) -> None:
+        _forbid_write("stash_put")
         self._stashes[job_id] = {"job_id": job_id, "songs": songs, "stash": stash}
 
     def stashes(self) -> List[Dict[str, Any]]:
         return [dict(v) for v in self._stashes.values()]
 
     def stash_delete(self, job_id: str) -> None:
+        _forbid_write("stash_delete")
         self._stashes.pop(job_id, None)
 
     def stats_get(self) -> Dict[str, Any]:
@@ -821,6 +861,7 @@ class MemoryStore(Store):
         return self._revision
 
     def stats_put(self, build: Dict[str, Any]) -> None:
+        _forbid_write("stats_put")
         self._stats = dict(build)
 
     def durations_all(self) -> Dict[str, float]:
@@ -831,6 +872,7 @@ class MemoryStore(Store):
             self._durations[video_id] = float(duration)
 
     def rate_limit_hit(self, key: str, limit: int, window_seconds: int) -> Tuple[bool, int, int]:
+        _forbid_write("rate_limit_hit")
         now = _now()
         entry = self._rate.get(key)
         if not entry or entry.get("resetAt", 0) <= now:
@@ -843,6 +885,7 @@ class MemoryStore(Store):
         return self._idem.get(key)
 
     def remember_idempotent_job(self, key: str, job_id: str, ttl_days: int = 7) -> None:
+        _forbid_write("remember_idempotent_job")
         if key:
             self._idem[key] = job_id
 

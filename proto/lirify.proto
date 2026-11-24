@@ -2,13 +2,25 @@
 //
 // Single source of truth for every service boundary:
 //
-//   astro-webui  (lirify.joscart.win)        -> Search / Recommend / GetTrack /
+//   CLOUD (read-only serving stack, three services)
+//     astro-webui  (lirify.joscart.win)      -> Search / Recommend / GetTrack /
 //                                               GetLyrics / ListTracks / Stream
-//   go-webui     (index.<domain>)            -> IndexPlaylist / QueuePlaylists /
-//                                               GetJob / GetIndexStats / WatchIndexStats
-//   external AI bot (HTTP/JSON gateway)      -> IndexPlaylistFromBot
+//     go-webui     (index.<domain>)          -> GetIndexStats / WatchIndexStats /
+//                                               GetJob (read-only dashboard)
+//     python-backend (SERVE_ONLY=true)       -> serves committed state only;
+//                                               every indexing RPC answers
+//                                               UNIMPLEMENTED
 //
-// python-backend is the only process that owns MongoDB Atlas and Qdrant Cloud.
+//   LOCAL (laptop indexing stack)
+//     local-ui     (dashboard, DASHBOARD_MODE=local)
+//                                            -> LirifyService (read + index RPCs)
+//                                            -> LirifyIndexerService (publish,
+//                                               local vocabulary + inverted index)
+//     local-indexer (SERVE_ONLY=false)       -> full indexing pipeline backed by
+//                                               llama.cpp Qwen3-Embedding-0.6B
+//
+// local-indexer is the only writer of MongoDB Atlas and Qdrant Cloud. The cloud
+// python-backend mounts them read-only and never scrapes, embeds or commits.
 // Neither web UI ever dials a database.
 //
 // Code generation (see scripts/gen_proto.sh):
@@ -208,6 +220,15 @@ message IndexStats {
   string tracks_store = 19;  // mongodb | memory
   string vectors_store = 20; // qdrant | none
   int32 max_indexed_songs = 21;
+  // --- serving / local indexer split ---------------------------------------
+  bool serve_only = 22;             // true on the Cloud Run serving stack
+  string mode = 23;                 // serve-only | indexer
+  string embedding_provider = 24;   // llama.cpp | hash
+  string tokenizer = 25;            // e.g. Qwen/Qwen3-Embedding-0.6B
+  string jaccard_scope = 26;        // name+artist (never lyrics/language)
+  int32 local_vocabulary_terms = 27;
+  int32 local_inverted_terms = 28;
+  string local_index_dir = 29;
 }
 
 message WatchIndexStatsRequest {
@@ -285,6 +306,56 @@ message IndexPlaylistFromBotResponse {
 }
 
 // ---------------------------------------------------------------------------
+// local-ui -> local-indexer (publish + local index introspection)
+// ---------------------------------------------------------------------------
+//
+// Triggering, queueing and progress streaming intentionally reuse LirifyService:
+// local-indexer exposes that same service with SERVE_ONLY=false, so a local job
+// uses the exact RPCs and messages the cloud stack already speaks. Only the
+// laptop-specific operations live in this second service, which the cloud
+// python-backend never registers.
+
+message PublishToCloudRequest {
+  // Rebuild the on-disk vocabulary + inverted index from the committed songs.
+  // Default (false) means "publish only"; true is the explicit rebuild.
+  bool rebuild_local_index = 1;
+  // 0 -> every committed song.
+  int32 limit = 2;
+}
+
+message PublishToCloudResponse {
+  bool published = 1;
+  int32 songs = 2;
+  int32 vectors = 3;          // points upserted into Qdrant (0 when disabled)
+  int32 vocabulary_terms = 4;
+  int32 inverted_terms = 5;
+  string directory = 6;
+  string message = 7;
+  int64 published_at = 8;     // unix seconds
+}
+
+message GetLocalIndexRequest {}
+
+message LocalIndexInfo {
+  string directory = 1;
+  string tokenizer = 2;              // Qwen/Qwen3-Embedding-0.6B
+  string tokenizer_backend = 3;      // tokenizers | transformers | fallback
+  string embedding_provider = 4;     // llama.cpp | hash
+  int32 documents = 5;
+  int32 vocabulary_terms = 6;
+  int32 inverted_terms = 7;
+  int64 vocabulary_bytes = 8;
+  int64 inverted_index_bytes = 9;
+  int64 updated_at = 10;             // unix seconds
+  string vocabulary_path = 11;
+  string inverted_index_path = 12;
+}
+
+message GetLocalIndexResponse {
+  LocalIndexInfo info = 1;
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
@@ -310,4 +381,14 @@ service LirifyService {
 
   // --- bot surface ----------------------------------------------------------
   rpc IndexPlaylistFromBot(IndexPlaylistFromBotRequest) returns (IndexPlaylistFromBotResponse);
+}
+
+// Laptop-only operations. Registered by local-indexer (SERVE_ONLY=false) and
+// never by the Cloud Run serving instance.
+service LirifyIndexerService {
+  // Force a write-through of the committed index to Atlas + Qdrant and
+  // optionally rebuild the local Qwen3 vocabulary/inverted index files.
+  rpc PublishToCloud(PublishToCloudRequest) returns (PublishToCloudResponse);
+  // Describe the local vocabulary + inverted index (paths, sizes, counts).
+  rpc GetLocalIndex(GetLocalIndexRequest) returns (GetLocalIndexResponse);
 }

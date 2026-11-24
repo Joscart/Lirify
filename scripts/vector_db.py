@@ -63,18 +63,17 @@ def jaccard_sets(a,b):
     return len(sa & sb)/len(sa | sb)
 
 n=len(songs)
-J_name=np.zeros((n,n)); J_artist=np.zeros((n,n)); J_lang=np.zeros((n,n))
+J_name=np.zeros((n,n)); J_artist=np.zeros((n,n))
 for i in range(n):
     for j in range(n):
         J_name[i,j]=jaccard_sets(names[i],names[j])
         J_artist[i,j]=jaccard_sets(artists[i],artists[j])
-        J_lang[i,j]=1.0 if langs[i]==langs[j] and langs[i]!="" else 0.0
 
 lyrics_sim = tfidf_unit.T @ tfidf_unit
 
-# Pesos
-W = {"name":0.10,"artist":0.05,"lang":0.05,"lyrics":0.8}
-unified = (W["name"]*J_name + W["artist"]*J_artist + W["lang"]*J_lang + W["lyrics"]*lyrics_sim)
+# Pesos: Jaccard solo para título/artista; letras = coseno TF-IDF.
+W = {"name":0.10,"artist":0.05,"lyrics":0.85}
+unified = (W["name"]*J_name + W["artist"]*J_artist + W["lyrics"]*lyrics_sim)
 # normalizar 0-1 por max
 mx = unified.max() if unified.max()>0 else 1
 unified = unified/mx

@@ -201,6 +201,12 @@ resource "google_cloud_run_v2_service" "python" {
         name  = "APP_VERSION"
         value = var.app_version
       }
+      # Read-only serving replica: no scrapers, no matrix/retry workers, no
+      # Atlas/Qdrant writes. The laptop local-indexer owns them.
+      env {
+        name  = "SERVE_ONLY"
+        value = "true"
+      }
       env {
         name  = "INDEX_REFRESH_SECONDS"
         value = tostring(var.index_refresh_seconds)
@@ -422,6 +428,12 @@ resource "google_cloud_run_v2_service" "go" {
       env {
         name  = "WATCH_INTERVAL_SECONDS"
         value = "5"
+      }
+      # Stats/health only: write endpoints answer 403 and the template hides the
+      # index controls.
+      env {
+        name  = "DASHBOARD_MODE"
+        value = "readonly"
       }
 
       startup_probe {

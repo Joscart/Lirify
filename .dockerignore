@@ -10,5 +10,9 @@ skills
 **/__pycache__
 **/*.pyc
 services/go-ui/go-ui
+# Local model weights + the indexer's local artefacts are bind-mounted at runtime,
+# never baked into an image or sent as build context.
+models
+local-index
 *.log
 .env

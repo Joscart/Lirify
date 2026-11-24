@@ -1,9 +1,12 @@
-// Command go-ui is the Lirify playlist indexer and operations dashboard.
+// Command go-ui is Lirify's operations dashboard. One binary, two roles:
 //
-// It is a stateless Cloud Run service: every read and write goes to
-// python-backend over gRPC/TLS (:443). go-ui holds no database credentials and
-// writes nothing to disk; the only in-memory state is the fan-out hub that
-// relays the python-backend stats stream to connected browsers via SSE.
+//	DASHBOARD_MODE=readonly  Cloud Run serving dashboard: stats/health only.
+//	DASHBOARD_MODE=local     Laptop indexer dashboard: same view plus index and
+//	                         publish controls, backed by the local-indexer gRPC.
+//
+// It is stateless: every read and write goes to a gRPC backend. go-ui holds no
+// database credentials and writes nothing to disk; the only in-memory state is
+// the fan-out hub that relays the stats stream to connected browsers via SSE.
 package main
 
 import (
