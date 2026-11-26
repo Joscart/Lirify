@@ -63,6 +63,12 @@ services:
       GRPC_INSECURE: "true"
       PYTHON_BACKEND_URL: http://api:8080
       PROTO_PATH: /app/proto/lirify.proto
+      # Cloudflare Workers AI understands the web search query. Either a Worker
+      # URL or ACCOUNT_ID + API_TOKEN; unset keeps the local lexical search.
+      CF_WORKER_URL: ${CF_WORKER_URL:-}
+      CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-}
+      CF_API_TOKEN: ${CF_API_TOKEN:-}
+      CF_AI_MODEL: ${CF_AI_MODEL:-@cf/meta/llama-3.1-8b-instruct}
     ports:
       - "4321:8080"   # host 4321 -> container 8080 (Cloud Run's port)
     depends_on:

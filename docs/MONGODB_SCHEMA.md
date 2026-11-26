@@ -1,16 +1,19 @@
 # MongoDB schema
 
-`local-indexer` (`SERVE_ONLY=false`) is the only writer. The Cloud Run
-`python-backend` runs `SERVE_ONLY=true`: it reads these collections and refuses
-every index write at the `store.py` boundary (resolved media durations remain an
-allowed player-metadata write). Documents are Mongo-native (`_id`) with
-camelCase fields, `schemaVersion` and `createdAt`/`updatedAt` timestamps, so the
-same collections can be modelled by Mongoose without adapters.
+`local-indexer` is the only writer of index state: it publishes songs and bumps
+`index_stats.revision` through `core.publicar()`. The Cloud Run `python-backend`
+is read-only and refuses every index write at the `store.py` boundary (resolved
+media durations remain an allowed player-metadata write). Documents are
+Mongo-native (`_id`) with camelCase fields, `schemaVersion` and
+`createdAt`/`updatedAt` timestamps.
 
 `services/api/app/store.py` creates the collections, `$jsonSchema` validators
-(`validationLevel: moderate`, `validationAction: warn`) and indexes on boot when
-it is not read-only, so a fresh Atlas M0 cluster needs no manual setup: the first
-`local-indexer` start creates them.
+(`validationLevel: moderate`, `validationAction: warn`) and indexes on boot, so a
+fresh Atlas M0 cluster needs no manual setup.
+
+`jobs`, `stashes`, `lyrics_cache`, `failed_songs` and the two `bot_*` collections
+are legacy: the standalone indexer keeps jobs in memory and has no retry ledger.
+They are listed below because the schema layer still defines them.
 
 ```js
 // docs/mongo/lirify.models.js — reference Mongoose models (not used at runtime)
@@ -62,7 +65,8 @@ const Job = mongoose.model("Job", new mongoose.Schema({
   stage:   { type: String, default: "" },
   attempts:{ type: Number, default: 0 },
   error:   { type: String, default: null },
-  errorCode:{ type: String, default: null },
+  errorCode:{ type: String, default: null },  // bot_api.classify_playlist_error
+  retryMode:{ type: String, default: null },  // never | agent-jitter
   added:   { type: Number, default: 0 },
   source:  { type: String, default: "manual" }, // go-webui | bot:<name> | manual
   batchId: { type: String, default: null },
@@ -130,16 +134,19 @@ transient. An M0 cluster is comfortably large for several thousand tracks.
 
 ```json
 {
-  "weights": {"name": 0.1, "artist": 0.05, "lyrics": 0.85},
-  "jaccard_scope": "name+artist",
+  "songs_indexed": 412,
+  "video_ids": 412,
   "vocabulary_size": 18234,
   "inverted_terms": 18234,
-  "songs_indexed": 412,
   "lyrics_tokens": 138294,
   "languages": {"en": 377, "es": 35},
-  "backends": {"limusic": 260, "boidu": 152}
+  "backends": {"limusic": 260, "boidu": 152},
+  "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+  "embedding_dim": 1024,
+  "embedding_provider": "sentence-transformers"
 }
 ```
 
-It is rewritten on every commit and read on boot so `/stats` is correct before the
-matrices finish rebuilding.
+It is rewritten on every publish together with `revision`. Only counts and
+embedding metadata are stored: no matrices ever reach Atlas or Qdrant, and the
+cloud replica reads this document for `/stats`.

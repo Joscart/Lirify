@@ -50,7 +50,7 @@ class TrackSummary(_message.Message):
     def __init__(self, video_id: _Optional[str] = ..., title: _Optional[str] = ..., artist: _Optional[str] = ..., language: _Optional[str] = ..., score: _Optional[float] = ..., thumb: _Optional[str] = ..., duration: _Optional[float] = ...) -> None: ...
 
 class Job(_message.Message):
-    __slots__ = ("job_id", "action", "url", "status", "stage", "error", "added", "attempts", "source", "created_at", "updated_at")
+    __slots__ = ("job_id", "action", "url", "status", "stage", "error", "added", "attempts", "source", "created_at", "updated_at", "error_code", "retry_mode")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     ACTION_FIELD_NUMBER: _ClassVar[int]
     URL_FIELD_NUMBER: _ClassVar[int]
@@ -62,6 +62,8 @@ class Job(_message.Message):
     SOURCE_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_CODE_FIELD_NUMBER: _ClassVar[int]
+    RETRY_MODE_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     action: str
     url: str
@@ -73,7 +75,9 @@ class Job(_message.Message):
     source: str
     created_at: int
     updated_at: int
-    def __init__(self, job_id: _Optional[str] = ..., action: _Optional[str] = ..., url: _Optional[str] = ..., status: _Optional[str] = ..., stage: _Optional[str] = ..., error: _Optional[str] = ..., added: _Optional[int] = ..., attempts: _Optional[int] = ..., source: _Optional[str] = ..., created_at: _Optional[int] = ..., updated_at: _Optional[int] = ...) -> None: ...
+    error_code: str
+    retry_mode: str
+    def __init__(self, job_id: _Optional[str] = ..., action: _Optional[str] = ..., url: _Optional[str] = ..., status: _Optional[str] = ..., stage: _Optional[str] = ..., error: _Optional[str] = ..., added: _Optional[int] = ..., attempts: _Optional[int] = ..., source: _Optional[str] = ..., created_at: _Optional[int] = ..., updated_at: _Optional[int] = ..., error_code: _Optional[str] = ..., retry_mode: _Optional[str] = ...) -> None: ...
 
 class SearchRequest(_message.Message):
     __slots__ = ("query", "limit")
@@ -102,14 +106,23 @@ class RecommendRequest(_message.Message):
     def __init__(self, video_id: _Optional[str] = ..., limit: _Optional[int] = ..., seed_video_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class RecommendResponse(_message.Message):
-    __slots__ = ("seed_video_id", "recommendations", "engine")
+    __slots__ = ("seed_video_id", "recommendations", "engine", "weights")
+    class WeightsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: float
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[float] = ...) -> None: ...
     SEED_VIDEO_ID_FIELD_NUMBER: _ClassVar[int]
     RECOMMENDATIONS_FIELD_NUMBER: _ClassVar[int]
     ENGINE_FIELD_NUMBER: _ClassVar[int]
+    WEIGHTS_FIELD_NUMBER: _ClassVar[int]
     seed_video_id: str
     recommendations: _containers.RepeatedCompositeFieldContainer[TrackSummary]
     engine: str
-    def __init__(self, seed_video_id: _Optional[str] = ..., recommendations: _Optional[_Iterable[_Union[TrackSummary, _Mapping]]] = ..., engine: _Optional[str] = ...) -> None: ...
+    weights: _containers.ScalarMap[str, float]
+    def __init__(self, seed_video_id: _Optional[str] = ..., recommendations: _Optional[_Iterable[_Union[TrackSummary, _Mapping]]] = ..., engine: _Optional[str] = ..., weights: _Optional[_Mapping[str, float]] = ...) -> None: ...
 
 class GetTrackRequest(_message.Message):
     __slots__ = ("video_id", "include_lyrics")
@@ -252,7 +265,7 @@ class GetIndexStatsRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class IndexStats(_message.Message):
-    __slots__ = ("indexed_songs", "video_ids", "vocabulary_size", "inverted_terms", "lyrics_tokens", "languages", "backends", "playlist_pending", "matrix_pending", "failed_songs", "cached_lyrics", "jobs", "matrices_available", "weights", "generated_at", "lyrics_providers", "top_terms", "stateless", "tracks_store", "vectors_store", "max_indexed_songs", "serve_only", "mode", "embedding_provider", "tokenizer", "jaccard_scope", "local_vocabulary_terms", "local_inverted_terms", "local_index_dir")
+    __slots__ = ("indexed_songs", "video_ids", "vocabulary_size", "inverted_terms", "lyrics_tokens", "languages", "backends", "playlist_pending", "matrix_pending", "failed_songs", "cached_lyrics", "jobs", "matrices_available", "weights", "generated_at", "lyrics_providers", "top_terms", "stateless", "tracks_store", "vectors_store", "max_indexed_songs", "serve_only", "mode", "embedding_provider", "tokenizer", "jaccard_scope", "local_vocabulary_terms", "local_inverted_terms", "local_index_dir", "revision")
     class LanguagesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -303,6 +316,7 @@ class IndexStats(_message.Message):
     LOCAL_VOCABULARY_TERMS_FIELD_NUMBER: _ClassVar[int]
     LOCAL_INVERTED_TERMS_FIELD_NUMBER: _ClassVar[int]
     LOCAL_INDEX_DIR_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
     indexed_songs: int
     video_ids: int
     vocabulary_size: int
@@ -332,7 +346,8 @@ class IndexStats(_message.Message):
     local_vocabulary_terms: int
     local_inverted_terms: int
     local_index_dir: str
-    def __init__(self, indexed_songs: _Optional[int] = ..., video_ids: _Optional[int] = ..., vocabulary_size: _Optional[int] = ..., inverted_terms: _Optional[int] = ..., lyrics_tokens: _Optional[int] = ..., languages: _Optional[_Mapping[str, int]] = ..., backends: _Optional[_Mapping[str, int]] = ..., playlist_pending: _Optional[int] = ..., matrix_pending: _Optional[int] = ..., failed_songs: _Optional[int] = ..., cached_lyrics: _Optional[int] = ..., jobs: _Optional[_Iterable[_Union[Job, _Mapping]]] = ..., matrices_available: _Optional[_Iterable[str]] = ..., weights: _Optional[_Mapping[str, float]] = ..., generated_at: _Optional[int] = ..., lyrics_providers: _Optional[_Iterable[str]] = ..., top_terms: _Optional[_Iterable[str]] = ..., stateless: bool = ..., tracks_store: _Optional[str] = ..., vectors_store: _Optional[str] = ..., max_indexed_songs: _Optional[int] = ..., serve_only: bool = ..., mode: _Optional[str] = ..., embedding_provider: _Optional[str] = ..., tokenizer: _Optional[str] = ..., jaccard_scope: _Optional[str] = ..., local_vocabulary_terms: _Optional[int] = ..., local_inverted_terms: _Optional[int] = ..., local_index_dir: _Optional[str] = ...) -> None: ...
+    revision: int
+    def __init__(self, indexed_songs: _Optional[int] = ..., video_ids: _Optional[int] = ..., vocabulary_size: _Optional[int] = ..., inverted_terms: _Optional[int] = ..., lyrics_tokens: _Optional[int] = ..., languages: _Optional[_Mapping[str, int]] = ..., backends: _Optional[_Mapping[str, int]] = ..., playlist_pending: _Optional[int] = ..., matrix_pending: _Optional[int] = ..., failed_songs: _Optional[int] = ..., cached_lyrics: _Optional[int] = ..., jobs: _Optional[_Iterable[_Union[Job, _Mapping]]] = ..., matrices_available: _Optional[_Iterable[str]] = ..., weights: _Optional[_Mapping[str, float]] = ..., generated_at: _Optional[int] = ..., lyrics_providers: _Optional[_Iterable[str]] = ..., top_terms: _Optional[_Iterable[str]] = ..., stateless: bool = ..., tracks_store: _Optional[str] = ..., vectors_store: _Optional[str] = ..., max_indexed_songs: _Optional[int] = ..., serve_only: bool = ..., mode: _Optional[str] = ..., embedding_provider: _Optional[str] = ..., tokenizer: _Optional[str] = ..., jaccard_scope: _Optional[str] = ..., local_vocabulary_terms: _Optional[int] = ..., local_inverted_terms: _Optional[int] = ..., local_index_dir: _Optional[str] = ..., revision: _Optional[int] = ...) -> None: ...
 
 class WatchIndexStatsRequest(_message.Message):
     __slots__ = ("interval_seconds",)
@@ -471,7 +486,7 @@ class PublishToCloudRequest(_message.Message):
     def __init__(self, rebuild_local_index: bool = ..., limit: _Optional[int] = ...) -> None: ...
 
 class PublishToCloudResponse(_message.Message):
-    __slots__ = ("published", "songs", "vectors", "vocabulary_terms", "inverted_terms", "directory", "message", "published_at")
+    __slots__ = ("published", "songs", "vectors", "vocabulary_terms", "inverted_terms", "directory", "message", "published_at", "unchanged")
     PUBLISHED_FIELD_NUMBER: _ClassVar[int]
     SONGS_FIELD_NUMBER: _ClassVar[int]
     VECTORS_FIELD_NUMBER: _ClassVar[int]
@@ -480,6 +495,7 @@ class PublishToCloudResponse(_message.Message):
     DIRECTORY_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     PUBLISHED_AT_FIELD_NUMBER: _ClassVar[int]
+    UNCHANGED_FIELD_NUMBER: _ClassVar[int]
     published: bool
     songs: int
     vectors: int
@@ -488,7 +504,8 @@ class PublishToCloudResponse(_message.Message):
     directory: str
     message: str
     published_at: int
-    def __init__(self, published: bool = ..., songs: _Optional[int] = ..., vectors: _Optional[int] = ..., vocabulary_terms: _Optional[int] = ..., inverted_terms: _Optional[int] = ..., directory: _Optional[str] = ..., message: _Optional[str] = ..., published_at: _Optional[int] = ...) -> None: ...
+    unchanged: bool
+    def __init__(self, published: bool = ..., songs: _Optional[int] = ..., vectors: _Optional[int] = ..., vocabulary_terms: _Optional[int] = ..., inverted_terms: _Optional[int] = ..., directory: _Optional[str] = ..., message: _Optional[str] = ..., published_at: _Optional[int] = ..., unchanged: bool = ...) -> None: ...
 
 class GetLocalIndexRequest(_message.Message):
     __slots__ = ()

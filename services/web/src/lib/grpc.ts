@@ -228,7 +228,9 @@ export async function recommend(
   ]);
   return {
     seed: toTrack(seedResponse.track),
-    score_weights: {},
+    // The backend now returns the weights on Recommend, so the player can
+    // explain the blend instead of guessing at an empty object.
+    score_weights: recResponse.weights || {},
     engine: recResponse.engine || "unknown",
     recommendations: (recResponse.recommendations || []).map((row) => ({
       ...toTrack(row),

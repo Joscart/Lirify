@@ -42,7 +42,7 @@ message Track {
   string video_id = 1;
   string title = 2;          // Normalised track title.
   string artist = 3;
-  string language = 4;       // en | es (index filter).
+  string language = 4;       // Best-effort BCP-47 label (metadata only; all languages index).
   string backend = 5;        // Lyrics provider that resolved the track.
   string youtube_title = 6;  // Original YouTube title.
   double duration = 7;       // Seconds, 0 when unknown.
@@ -75,6 +75,8 @@ message Job {
   string source = 9;         // go-webui | bot:<name> | manual
   int64 created_at = 10;     // unix seconds
   int64 updated_at = 11;     // unix seconds
+  string error_code = 12;    // stable failure code from bot_api.classify_playlist_error
+  string retry_mode = 13;    // never | agent-jitter (who owns the retry decision)
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +107,8 @@ message RecommendResponse {
   repeated TrackSummary recommendations = 2;
   // "qdrant" | "matrix" (in-process fallback)
   string engine = 3;
+  // Score breakdown the player displays: name .10 / artist .05 / lyrics .85.
+  map<string, double> weights = 4;
 }
 
 message GetTrackRequest {
@@ -229,6 +233,7 @@ message IndexStats {
   int32 local_vocabulary_terms = 27;
   int32 local_inverted_terms = 28;
   string local_index_dir = 29;
+  int64 revision = 30;              // index_stats.revision this replica serves
 }
 
 message WatchIndexStatsRequest {
@@ -332,6 +337,7 @@ message PublishToCloudResponse {
   string directory = 6;
   string message = 7;
   int64 published_at = 8;     // unix seconds
+  bool unchanged = 9;         // true when the payload matched the last publish
 }
 
 message GetLocalIndexRequest {}

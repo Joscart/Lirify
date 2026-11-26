@@ -15,7 +15,8 @@
 
 import type { APIRoute } from "astro";
 
-import { lyrics, recommend, search } from "../../../lib/grpc";
+import { lyrics, recommend } from "../../../lib/grpc";
+import { searchWithAi } from "../../../lib/search-ai";
 
 export const prerender = false;
 
@@ -85,10 +86,14 @@ export const ALL: APIRoute = async ({ params, request, url }) => {
     const limit = Number(url.searchParams.get("limit") || 24);
     if (!query.trim()) return json({ query, top: null, tracks: [], artists: [], snippet: "", scanned: 0 });
     try {
-      const payload = await search(query, limit);
+      const payload = await searchWithAi(query, limit);
       return new Response(JSON.stringify(payload), {
         status: 200,
-        headers: { ...JSON_HEADERS, "cache-control": "no-store", "x-lirify-transport": "grpc" },
+        headers: {
+          ...JSON_HEADERS,
+          "cache-control": "no-store",
+          "x-lirify-transport": "cloudflare-ai+grpc",
+        },
       });
     } catch (error) {
       return failure(error);

@@ -1,13 +1,16 @@
 # Lirify
 
-Lyrics index/player split into two stacks that share one contract:
+Lyrics index/player split into two independent stacks that share one gRPC
+contract:
 
-- **Cloud serving (read-only, three Cloud Run services):** `python-backend`
-  (`SERVE_ONLY=true`), `go-webui` (`DASHBOARD_MODE=readonly`) and `astro-webui`.
-  They serve committed state and never scrape, embed or write index state.
-- **Local indexing (laptop, RTX 2050 4 GB):** `local-indexer` (same Python code,
-  `SERVE_ONLY=false`), `local-ui` (same Go dashboard, `DASHBOARD_MODE=local`) and
-  `llama.cpp` serving Qwen3-Embedding-0.6B. Only the laptop writes Atlas/Qdrant.
+- **Cloud serving (read-only, three Cloud Run services):** `python-backend`,
+  `go-webui` (`DASHBOARD_MODE=readonly`) and `astro-webui`. They serve committed
+  songs and pre-computed LLM embeddings. No scraping, no embeddings, no matrices,
+  no index writes.
+- **Local indexing (standalone, laptop):** `local-indexer` (ingestion + `core.py`
+  + sentence-transformers Qwen3-Embedding-0.6B + Atlas/Qdrant writes) and
+  `local-ui` (the same Go dashboard, `DASHBOARD_MODE=local`). It never calls the
+  cloud API, and the cloud API never calls it.
 
 Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 `docs/MONGODB_SCHEMA.md`, and the agent skill at
@@ -17,39 +20,40 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 
 - Serving stack: `docker compose up -d --build` starts `api`, `web`, `go-ui`
   against `MONGODB_URI`/`QDRANT_URL` from `.env` (Atlas + Qdrant Cloud here).
-  `api` runs `SERVE_ONLY=true`: index routes answer `403`, indexing RPCs
-  `UNIMPLEMENTED`, and only the revision poller runs.
+  `api` is read-only: index routes answer `403`, indexing RPCs `UNIMPLEMENTED`.
 - Containerised databases:
   `docker compose -f docker-compose.yml -f docker-compose.local-db.yml up -d --build`
   adds `mongo`, `db-init`, `qdrant`.
-- Local indexing stack:
-  `docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml up -d --build llama local-indexer local-ui`
-  (ports: `local-ui` 8090, `local-indexer` 50052→50051, `llama` 8081→8080).
-  Model + tokenizer: `scripts/local/fetch_qwen3_embedding.sh`.
-- Local compose runs unlimited on purpose: `MAX_INDEXED_SONGS=-1`,
-  `PUBLIC_RATE_LIMIT_PER_MINUTE=0`, `BOT_RATE_LIMIT=0`. Production uses 3000 /
-  120/min / 30 per hour.
-- Rebuild after edits: `docker compose build <service> && docker compose up -d <service>`.
-  Go UI templates are embedded with `go:embed`, so template edits need a rebuild.
-  The local-indexer image builds from the repository root:
+- Local indexer stack:
+  `docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml up -d --build local-indexer local-ui`
+  (ports: `local-ui` 8090, `local-indexer` 50052→50051). No llama.cpp service:
+  `core.py` embeds with sentence-transformers inside `local-indexer`.
+- First local-indexer start downloads `Qwen/Qwen3-Embedding-0.6B` into the
+  `hf_cache` volume. Rebuilds after edits:
+  `docker compose build local-indexer && docker compose up -d local-indexer`.
+  The image builds from the repository root (it needs the generated gRPC stubs):
   `docker build -f services/local-indexer/Dockerfile .`
+- Web search uses Cloudflare Workers AI. Configure `CF_WORKER_URL`, or
+  `CF_ACCOUNT_ID` + `CF_API_TOKEN`, plus optional `CF_AI_MODEL`; unset falls back
+  to lexical search.
 - Logs: `docker compose logs -f api` / `... logs -f local-indexer`.
 - Verify with:
   - `python3 -m py_compile services/api/app/*.py services/local-indexer/*.py`
+  - `cd services/local-indexer && python3 -m unittest discover -s tests -p 'test_*.py'`
   - `cd services/go-ui && go build ./... && go vet ./...`
   - `cd services/web && npm run build`
   - `./scripts/gen_proto.sh --check` (fails if generated stubs drift)
 - Smoke-test: `curl localhost:8000/health` (`mode=serve-only`), `/stats`,
-  `/queue`, `/cache`, `/providers`, `/api/v1/bot/health`; `POST /index` → 403;
-  then `curl localhost:8080/health`/`readyz`, `curl localhost:4321/health`.
+  `/queue`, `/cache`, `/api/v1/bot/health`; `POST /index` → 403; then
+  `curl localhost:8080/api/stats`, `curl localhost:8080/api/tracks`,
+  `curl localhost:4321/health`.
 - gRPC check: `grpcurl -proto proto/lirify.proto -plaintext localhost:8000 \
   lirify.v1.LirifyService/GetIndexStats`; local indexer on `localhost:50052`
   also exposes `lirify.v1.LirifyIndexerService/GetLocalIndex`.
 - Index via `local-ui` (8090) or gRPC:
   `grpcurl -proto proto/lirify.proto -plaintext localhost:50052 -d
   '{"playlist_urls":["<url>"]}' lirify.v1.LirifyService/QueuePlaylists`.
-  `POST /queue` works only on an API you run with `SERVE_ONLY=false`; the cloud
-  bot API is intentionally unavailable. The local-indexer has no HTTP surface.
+  The local-indexer has no HTTP surface.
 - Player dev: `cd services/web && npm run dev` (SSR; needs `GRPC_TARGET` and
   `PYTHON_BACKEND_URL`). `PUBLIC_API_BASE=http://HOST:8000` bypasses the SSR
   proxy for direct-to-API debugging.
@@ -62,45 +66,40 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   committed and CI drift-checks them. Never hand-edit generated files.
   `LirifyService` carries read + index RPCs; `LirifyIndexerService` adds
   `PublishToCloud` and `GetLocalIndex` for the laptop only.
-- `services/api/app/main.py` is the core monolith: committed `STATE`, lyric
-  normalization, scraping, queue workers, TF-IDF/matrices, search, recommend,
-  bot router and the legacy `/ws` stream. `SERVE_ONLY` disables every mutation
-  and worker except the revision poller.
-- `services/api/app/qwen_tokenizer.py` loads the exact
-  `Qwen/Qwen3-Embedding-0.6B` tokenizer (`QWEN3_TOKENIZER_PATH` or HF) and
-  degrades to the legacy whitespace/stem tokenizer when the assets are absent
-  (the cloud image).
+- `services/local-indexer/core.py` is **the engine**: text pipeline (one flat
+  term list), inverted index, TF-IDF matrices, `SentenceTransformer`, `buscar()`,
+  `recomendar()`, `estadisticas()` and `publicar()`. Tests:
+  `services/local-indexer/tests/test_core.py` (offline, fake encoder).
+- `services/local-indexer/ingest.py` is the only scraper (`yt-dlp`, noembed,
+  langdetect); `lyrics_sources.py` holds the 9-provider Limusic chain. Add or
+  reorder providers there.
+- `services/local-indexer/pipeline.py` serialises playlists, keeps jobs in
+  memory and calls `core.Indexer` → `core.publicar`. `local_server.py` is the
+  gRPC entrypoint for `local-ui`; it registers both services.
+- `services/api/app/main.py` is now a small read-only server: committed `STATE`
+  from Atlas, lexical `search`, Qdrant `recommend_songs`, stats and the player
+  router. It builds no matrices and imports no ingestion code.
 - `services/api/app/store.py` is the **only** Mongo access layer. When
-  `SERVE_ONLY=true` it refuses every index write (`ReadOnlyStoreError`); only
-  `duration_put` (player metadata) is allowed. No module writes the container
-  filesystem.
-- `services/api/app/vector.py` is the only Qdrant access layer: llama.cpp
-  `/v1/embeddings` when `LLAMA_EMBED_URL` is set, deterministic hash fallback
-  otherwise, upsert/search/delete, `NullVectorStore` fallback. When
-  `SERVE_ONLY=true` it never creates a collection or upserts.
+  `SERVE_ONLY=true` it refuses every index write; only `duration_put` (player
+  metadata) is allowed.
+- `services/api/app/vector.py` is the only Qdrant access layer and it is
+  read-only in the cloud: `neighbours()` for recommendations, `NullVectorStore`
+  fallback. It never creates the collection or upserts.
 - `services/api/app/grpc_server.py` serves `lirify.v1.LirifyService` over h2c on
-  `GRPC_PORT` (50051) from the FastAPI startup hook (`GRPC_INPROCESS`). Indexing
-  RPCs abort with `UNIMPLEMENTED` when `SERVE_ONLY=true`. `Caddyfile` + `run.sh`
-  mux one Cloud Run port; `_abort()` sends initial metadata first so status codes
-  survive Caddy's trailers-only handling.
-- `services/local-indexer/local_server.py` is the gRPC-only writer entrypoint:
-  registers both services, starts the workers, and hooks
-  `local_store.rebuild` after every commit. `local_store.py` is the only local
-  disk writer: `vocabulary.json` + `inverted_index.json` (atomic, Qwen3 terms).
-- `services/api/app/bot_api.py` is the bearer-protected `/api/v1/bot/*` router,
-  mounted only when `SERVE_ONLY=false`.
-- `services/api/app/lyrics_sources.py` holds the 9-provider Limusic fallback chain.
-  Add or reorder providers there, not in `main.py`.
+  `GRPC_PORT` from the FastAPI startup hook (`GRPC_INPROCESS`). Indexing RPCs
+  abort with `UNIMPLEMENTED`. `Caddyfile` + `run.sh` mux one Cloud Run port.
 - `services/api/app/player_api.py` is the additive, read-only `/api/player/*`
-  router plus `preview_matrices`; it persists only resolved durations and the
-  in-memory playback session.
+  router; it persists only resolved durations and the playback session. It
+  tolerates `state["matrices"]` being empty (the cloud has no matrices).
 - `services/go-ui/{main,server,grpcclient,hub}.go` plus `templates/index.html`:
   JSON endpoints and SSE adapted from gRPC. `DASHBOARD_MODE=readonly` hides the
-  controls, answers `403` on write routes and never registers the indexer stub in
-  practice; `local` adds `/api/publish` and `/api/local-index`.
+  controls and answers `403` on write routes; `local` adds `/api/publish` and
+  `/api/local-index`. `/api/tracks` lists every committed track.
 - `services/web` is the Astro SSR player. `src/lib/grpc.ts` is server-only;
-  `src/pages/api/player/[...path].ts` answers search/recommend/lyrics over gRPC
-  and proxies read-only endpoints to python-backend.
+  `src/lib/cloudflare.ts` expands search queries with Workers AI;
+  `src/lib/search-ai.ts` merges the per-keyword gRPC searches.
+  `src/pages/api/player/[...path].ts` answers search/recommend/lyrics and proxies
+  read-only endpoints to python-backend.
 - `scripts/` (except `gen_proto.sh` and `scripts/local/`) is standalone
   coursework/experimentation and is not wired into the services.
 - `infra/` is the deployable stack; `infra/bootstrap/` creates the state bucket,
@@ -108,74 +107,61 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 
 ## Indexing invariants
 
-- Only `local-indexer` (`SERVE_ONLY=false`) indexes. The index is accumulative:
-  jobs add tracks, they never reset the library.
-- Two workers: `index_worker` scrapes and stores a stash in the Mongo `stashes`
-  collection; `matrix_worker` computes matrices and commits the stash atomically.
+- Only `local-indexer` indexes. The index is accumulative: playlists add tracks;
+  the library is never reset.
 - Only songs with non-empty lyrics are committed. **Any language is indexable**;
-  this rule is applied in `stage_index`, `stage_matrix`, `load_state`, and the
-  failed-song retry worker.
-- Language detection (`langdetect` best effort) is metadata only and never
-  gates a commit.
-- Duplicate handling is per song at commit. A batch is skipped only when it has
-  zero new unique, eligible songs; partial duplicate batches still commit the new ones.
-- Successful lyric lookups are cached in `lyrics_cache`; negative results are not
-  cached, they go to `failed_songs` and are retried by the background worker.
-- Pending jobs persist in `jobs`. Playlist scrape failures never retry on the
-  server: the job ends in `error`/`gave_up` with a classified `error_code` and a
-  `retry_mode`. `MAX_JOB_ATTEMPTS` (8) and `RETRY_INTERVAL_SECONDS` (300) bound
-  matrix-commit and failed-song retries only.
-- `MAX_INDEXED_SONGS` (default 3000 with `python_memory = 1Gi`) bounds
-  `load_state` and commits (`Index capacity guard`). `-1` disables it locally.
-  Measured peak RSS: 1000 songs ≈ 227 MB, 1661 ≈ 401 MB.
+  language detection is metadata only and unsupported languages fall back to a
+  generic tokenizer instead of being dropped.
+- Duplicates are skipped per `video_id` inside `core.indexar_canciones`.
+- `core.publicar()` writes songs to Atlas and LLM embeddings to Qdrant, then bumps
+  `index_stats.revision`. It is the only cloud write path.
+- No matrices are published. `index_stats.build` carries counts and embedding
+  metadata only.
+- `PUBLISH_ON_INDEX=1` publishes after each committed playlist;
+  `LOCAL_INDEX_DIR` is no longer used (there are no local index files).
+- `LOAD_ON_START=1` hydrates the in-memory index from Atlas so restarts keep the
+  library and duplicate detection intact.
 - **Never prune from a capped load.** A replica that hydrates a subset must not
-  delete rows it did not read. `prune_songs` is explicit, never a boot side effect.
-- Every commit bumps `index_stats.revision`. Cloud instances check it on inbound
-  requests (`INDEX_CHECK_SECONDS`, 10) and via a 60 s poller, then re-hydrate.
-  `POST /admin/reload` (bot bearer) forces it.
-- Embeddings: llama.cpp Qwen3-Embedding-0.6B, 1024 dims, collection
-  `lirify_lyrics_qwen3`. The client batches 8 and truncates to 6000 chars
-  (`LLAMA_EMBED_*`); hash fallback keeps indexing alive if llama is down.
-- Similarity weights live only in `WEIGHTS` in `main.py`: name `.10`, artist
-  `.05`, lyrics `.85`. Jaccard is **only** used for title/artist (Qwen3 subword
-  sets when available); lyrics is TF-IDF cosine. Language is not a similarity
-  dimension and there is no language allow-list. `JACCARD_SCOPE = "name+artist"`
-  is reported in stats.
-- The public REST surface is rate limited per IP on the serving replica; the bot
-  write path (only with `SERVE_ONLY=false`) is limited per API key in Mongo.
+  delete rows it did not read.
+- Cloud instances compare `index_stats.revision` on inbound requests
+  (`INDEX_CHECK_SECONDS`, 10) and via the 60 s poller, then re-read songs.
+  `POST /admin/reload` forces it.
+- Embeddings: sentence-transformers `Qwen/Qwen3-Embedding-0.6B`, 1024 dims,
+  collection `lirify_lyrics_qwen3`.
+- Similarity weights in the cloud live in `main.WEIGHTS`: name `.10`, artist
+  `.05`, lyrics `.85`. Jaccard is **only** title/artist; lyrics is Qdrant
+  similarity. Language is not a similarity dimension and there is no allow-list.
+- The public REST surface is rate limited per IP
+  (`PUBLIC_RATE_LIMIT_PER_MINUTE`; 0 disables it).
 
 ## Gotchas
 
-- `SERVE_ONLY` defaults to **true**. Forgetting it yields a serving replica that
-  cannot mutate the index (safe); set it to `0` only for `local-indexer`.
-- Two tokenizers exist: Qwen3 subwords (laptop, with assets) and the legacy
-  whitespace/Snowball tokenizer (cloud image). Qdrant recommendations are
-  unaffected; only the in-process matrix fallback differs. See
-  `docs/ARCHITECTURE.md`.
+- Indexing routes in the cloud are gone by design: `/index`, `/queue`,
+  `/extract`, `/retry` return `403` and the bot router is not mounted.
 - Switching embedding dimension requires a **new Qdrant collection name**
-  (`QDRANT_COLLECTION`) on both stacks and a **Publish to cloud** backfill.
-  Never point 1024-dim vectors at the old 256-dim `lirify_lyrics`.
-- Only two local files are allowed: `local-index/vocabulary.json` and
-  `local-index/inverted_index.json`. Do not add song dumps or local caches.
+  (`QDRANT_COLLECTION`) plus a publish backfill. Never point 1024-dim vectors at
+  the old 256-dim `lirify_lyrics`.
+- `local_indexer` is GPU-heavy on first run (torch + model download). Keep the
+  `hf_cache` volume; deleting it forces a full re-download.
 - `data/` is legacy and unmounted. Do not reintroduce file I/O in the cloud API.
+- `services/api/app/qwen_tokenizer.py` is no longer imported by any service; it is
+  kept only because it carries uncommitted user edits.
 - MongoDB is configured by **connection string only**: `MONGODB_URI` (alias
   `MONGO_URI`) for the API, `MONGO_ROOT_URI` for `db-init`. The DB name comes from
-  the URI path when `MONGODB_DB` is unset. `infra/mongo/init.js` parses
-  `MONGODB_URI`.
+  the URI path when `MONGODB_DB` is unset.
 - Atlas users live in `admin`: `MONGODB_URI` needs `authSource=admin`.
-- Legacy JSON can be loaded with `scripts/migrate_json_to_mongo.py` (run it
-  against the configured database from the laptop, not from the serving image).
 - GitHub environment variables/secrets are invisible to jobs that do not declare
   the environment. All config-consuming jobs declare `Lirify`; check with
   `scripts/setup-github.sh --check`.
 - After editing Python code, `docker compose up -d api` is not enough: run
   `docker compose build api && docker compose up -d api` (or the local-indexer
   equivalent).
-- README and this file must stay in sync with `main.py`, `store.py`,
-  `vector.py`, `local_store.py` and the proto.
+- README and this file must stay in sync with `core.py`, `pipeline.py`,
+  `main.py`, `store.py`, `vector.py` and the proto.
 - `GET /song/{id}` and `/songs` expose only committed songs.
-- `yt-dlp` is required at runtime for playlist extraction, durations, and the
-  player stream proxy. YouTube bot challenges are an egress problem, not a bug.
+- `yt-dlp` is required at runtime for playlist extraction (local-indexer) and the
+  player stream proxy (python-backend). YouTube bot challenges are an egress
+  problem, not a bug.
 - go-webui has no WebSocket: SSE `/api/events` is fed by the gRPC stats watch.
   Update `templates/index.html` and `hub.go` together.
 - Astro is `output: "server"` (node adapter); use `npm run build && npm start`.

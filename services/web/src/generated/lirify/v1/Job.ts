@@ -14,6 +14,8 @@ export interface Job {
   'source'?: (string);
   'createdAt'?: (number | string | Long);
   'updatedAt'?: (number | string | Long);
+  'errorCode'?: (string);
+  'retryMode'?: (string);
 }
 
 export interface Job__Output {
@@ -28,4 +30,6 @@ export interface Job__Output {
   'source': (string);
   'createdAt': (string);
   'updatedAt': (string);
+  'errorCode': (string);
+  'retryMode': (string);
 }

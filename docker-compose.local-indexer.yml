@@ -1,51 +1,14 @@
 # ---------------------------------------------------------------------------
-# Lirify LOCAL INDEXING stack (laptop, RTX 2050 4 GB + Arch/Docker).
+# Lirify LOCAL indexer stack (laptop, RTX 2050 4 GB + Arch/Docker).
 #
 #   docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml \
-#     up -d llama local-indexer local-ui
+#     up -d local-indexer local-ui
 #
-# This overlay adds exactly three services to the read-only serving stack:
-#
-#   llama        llama.cpp server with Qwen3-Embedding-0.6B (GGUF, CUDA)
-#   local-indexer  full pipeline (SERVE_ONLY=0) -> Atlas + Qdrant, gRPC :50051
-#   local-ui     the same Go dashboard in DASHBOARD_MODE=local (:8090)
-#
-# Prerequisites:
-#   1. scripts/local/fetch_qwen3_embedding.sh   (downloads GGUF + tokenizer)
-#   2. NVIDIA driver + nvidia-container-toolkit (`nvidia-smi` in Docker)
-#   3. `.env` already points at Atlas + Qdrant Cloud (the shared databases).
-#
-# The 4 GB VRAM budget is why the server runs Q8_0 with a short context and a
-# small ubatch: weights (~0.65 GB) + KV/compute buffers leave headroom for the
-# compositor. Raise -c/-b only after checking `nvidia-smi` memory during an
-# index run.
+# The local indexer is standalone: it scrapes, runs core.py (sentence-transformers
+# Qwen3-Embedding-0.6B), and writes only songs (Atlas) + LLM embeddings (Qdrant).
+# It never calls the cloud API, and the cloud API never calls it.
 # ---------------------------------------------------------------------------
 services:
-  llama:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
-    container_name: lirify-llama
-    restart: unless-stopped
-    command: >
-      --model /models/qwen3-embedding/Qwen3-Embedding-0.6B-Q8_0.gguf
-      --host 0.0.0.0 --port 8080
-      --embedding --pooling last
-      --ctx-size 2048
-      --batch-size 256
-      --ubatch-size 256
-      --parallel 1
-      --n-gpu-layers 99
-    volumes:
-      - ./models:/models:ro
-    ports:
-      - "8081:8080"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
   local-indexer:
     build:
       context: .
@@ -54,27 +17,23 @@ services:
     env_file:
       - .env
     environment:
-      SERVE_ONLY: "0"
-      GRPC_INPROCESS: "0"
       GRPC_PORT: "50051"
-      LLAMA_EMBED_URL: http://llama:8080
-      LLAMA_EMBED_MODEL: qwen3-embedding-0.6b
-      LLAMA_EMBED_BATCH: "8"
-      LLAMA_EMBED_MAX_CHARS: "6000"
-      QWEN3_TOKENIZER_ID: Qwen/Qwen3-Embedding-0.6B
-      QWEN3_TOKENIZER_PATH: /models/qwen3-embedding/tokenizer.json
-      LOCAL_INDEX_DIR: /data/local-index
-      # Qwen3-Embedding-0.6B is 1024-dimensional. Use a dedicated collection so
-      # an old 256-dim hash collection cannot poison the new vectors.
+      EMBEDDING_MODEL: Qwen/Qwen3-Embedding-0.6B
+      EMBEDDING_DIM: "1024"
       QDRANT_COLLECTION: lirify_lyrics_qwen3
-      QDRANT_VECTOR_SIZE: "1024"
+      PUBLISH_ON_INDEX: "1"
+      LOAD_ON_START: "1"
     volumes:
-      - ./models:/models:ro
-      - local_index:/data/local-index
+      - hf_cache:/root/.cache/huggingface
     ports:
-      - "50052:50051"   # host 50052 -> local-indexer gRPC (serving api keeps 50051)
-    depends_on:
-      - llama
+      - "50052:50051"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped
 
   local-ui:
@@ -93,4 +52,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  local_index:
+  hf_cache:

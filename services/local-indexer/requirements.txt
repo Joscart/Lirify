@@ -1,6 +1,15 @@
-# Extra dependencies for the laptop indexer. The serving image does not install
-# these: it never tokenises with Qwen3 and never embeds through llama.cpp.
-# `tokenizers` loads the exact Qwen/Qwen3-Embedding-0.6B tokenizer.json that the
-# local stack mounts at QWEN3_TOKENIZER_PATH.
-tokenizers>=0.15,<1
-huggingface_hub>=0.23,<2
+# Standalone local indexer: ingestion + core.py engine + Atlas/Qdrant writes.
+# No FastAPI, no cloud API modules.
+requests>=2.31,<3
+numpy>=1.26,<3
+nltk>=3.8,<4
+lingua-language-detector>=2.0,<3
+sentence-transformers>=3.0,<6
+yt-dlp>=2024.1.1
+langdetect>=1.0.9,<2
+pymongo>=4.9,<5
+dnspython>=2.3
+grpcio>=1.62,<2
+grpcio-health-checking>=1.62,<2
+grpcio-reflection>=1.62,<2
+protobuf>=5.26,<7

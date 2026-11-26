@@ -15,6 +15,12 @@ with the llama.cpp embeddings. This module is the single loader for
 
 Nothing here downloads model weights: only the tokenizer assets, and only when a
 path or the optional libraries are present.
+
+Encoding note: Qwen3 uses byte-level BPE, so raw tokens are printable stand-ins
+for UTF-8 bytes (``\u0120`` for a space, ``Ã©`` for ``é``). :func:`decode_token`
+turns one token back into text for logs, the dashboard and vocabulary keys; token
+ids and their order stay exactly as the model produced them, so term matching
+remains deterministic.
 """
 
 from __future__ import annotations
@@ -35,9 +41,50 @@ ENABLED = (os.environ.get("QWEN3_TOKENIZER_ENABLED") or "1").strip().lower() not
 
 # Qwen3 uses ChatML markers; they are structural, never vocabulary terms.
 _SPECIAL_RE = re.compile(r"^<\|.*\|>$")
-# Byte-level BPE marks a leading space with U+0120 and a newline with U+010A.
-_BYTE_LEVEL_RE = re.compile(r"[\u0120\u010a]")
-_ALNUM_RE = re.compile(r"[0-9A-Za-z\u00c0-\u024f]")
+# Byte-level BPE stores UTF-8 bytes as printable Unicode code points (GPT-2's
+# bytes_to_unicode mapping). Decode them before display or vocabulary use, so a
+# Spanish/Japanese token reads as text instead of "Ã©"/"ãģ“".
+_ALNUM_RE = re.compile(r"\w", re.UNICODE)
+
+
+def _bytes_to_unicode() -> dict:
+    """GPT-2/Qwen byte-level BPE alphabet: byte value -> visible character."""
+    values = (
+        list(range(ord("!"), ord("~") + 1))
+        + list(range(ord("\u00a1"), ord("\u00ac") + 1))
+        + list(range(ord("\u00ae"), ord("\u00ff") + 1))
+    )
+    chars = values[:]
+    extra = 0
+    for byte in range(2**8):
+        if byte not in values:
+            values.append(byte)
+            chars.append(2**8 + extra)
+            extra += 1
+    return dict(zip(values, (chr(char) for char in chars)))
+
+
+_BYTE_DECODER = {char: byte for byte, char in _bytes_to_unicode().items()}
+
+
+def decode_token(token: str) -> str:
+    """Best-effort UTF-8 decoding of one byte-level BPE token for display.
+
+    Token *ids* are untouched: only the human-readable term is decoded. A token
+    can split a multi-byte codepoint across neighbours, so undecodable bytes
+    become U+FFFD rather than raising.
+    """
+    if not token:
+        return ""
+    raw = bytearray()
+    for char in token:
+        byte = _BYTE_DECODER.get(char)
+        if byte is None:
+            raw.extend(char.encode("utf-8", errors="replace"))
+        else:
+            raw.append(byte)
+    return raw.decode("utf-8", errors="replace")
+
 
 _LOCK = threading.Lock()
 _LOADED = False
@@ -116,7 +163,7 @@ def backend() -> str:
 
 
 def _clean(token: str) -> Optional[str]:
-    token = _BYTE_LEVEL_RE.sub(" ", token).strip().lower()
+    token = decode_token(token).replace("\n", " ").strip().lower()
     if not token or _SPECIAL_RE.match(token):
         return None
     if not _ALNUM_RE.search(token):

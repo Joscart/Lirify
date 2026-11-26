@@ -70,6 +70,7 @@ func (h *Hub) Snapshot() map[string]any {
 	if h.last == nil {
 		return map[string]any{
 			"indexed_songs": 0,
+			"revision":      0,
 			"queue": map[string]any{
 				"playlist_pending": 0,
 				"matrix_pending":   0,
@@ -134,10 +135,12 @@ func (h *Hub) publish(stats *lirifypb.IndexStats) {
 				"job_id":    job.JobId,
 				"status":    status,
 				"job_stage": job.Stage,
-				"message":   jobStatusMessage(job),
-				"url":       job.Url,
-				"added":     job.Added,
-				"ts":        time.Now().Unix(),
+				"message":    jobStatusMessage(job),
+				"error_code": job.ErrorCode,
+				"retry_mode": job.RetryMode,
+				"url":        job.Url,
+				"added":      job.Added,
+				"ts":         time.Now().Unix(),
 			})
 		}
 	}
@@ -161,6 +164,7 @@ func (h *Hub) publish(stats *lirifypb.IndexStats) {
 	h.broadcast(map[string]any{
 		"event":         "stats",
 		"indexed_songs": stats.IndexedSongs,
+		"revision":      stats.Revision,
 		"queue": map[string]any{
 			"playlist_pending": stats.PlaylistPending,
 			"matrix_pending":   stats.MatrixPending,
@@ -188,8 +192,12 @@ func jobStatusMessage(job *lirifypb.Job) string {
 	case "skipped":
 		return "Skipped (duplicate or filtered)"
 	case "error":
-		if job.Error != "" {
-			return "Failed: " + job.Error
+		detail := job.Error
+		if job.ErrorCode != "" {
+			detail = "[" + job.ErrorCode + "] " + detail
+		}
+		if detail != "" {
+			return "Failed: " + detail
 		}
 		return "Failed"
 	default:

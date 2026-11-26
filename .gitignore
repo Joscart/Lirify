@@ -21,6 +21,9 @@ crash.log
 .env
 .env.local
 
+# --- local model assets (downloaded by scripts/local/fetch_qwen3_embedding.sh)
+models/
+
 # Keep the dependency lock files and generated contracts committed:
 !infra/.terraform.lock.hcl
 !infra/bootstrap/.terraform.lock.hcl

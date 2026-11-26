@@ -465,9 +465,10 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
       <a class="nav-item" href="#ingest" data-nav="ingest"><svg class="icon"><use href="#i-ingest"/></svg><span>Ingest</span><span class="nav-hint">02</span></a>
       <a class="nav-item" href="#queue" data-nav="queue"><svg class="icon"><use href="#i-queue"/></svg><span>Queue</span><span class="nav-hint">03</span></a>
       <a class="nav-item" href="#metrics" data-nav="metrics"><svg class="icon"><use href="#i-metrics"/></svg><span>Metrics</span><span class="nav-hint">04</span></a>
-      <a class="nav-item" href="#matrices" data-nav="matrices"><svg class="icon"><use href="#i-matrix"/></svg><span>Matrices</span><span class="nav-hint">05</span></a>
-      {{if .LocalMode}}<a class="nav-item" href="#local-index" data-nav="local-index"><svg class="icon"><use href="#i-database"/></svg><span>Local index</span><span class="nav-hint">06</span></a>{{end}}
-      <a class="nav-item" href="#diagnostics" data-nav="diagnostics"><svg class="icon"><use href="#i-diagnostics"/></svg><span>Diagnostics</span><span class="nav-hint">{{if .LocalMode}}07{{else}}06{{end}}</span></a>
+      <a class="nav-item" href="#tracks" data-nav="tracks"><svg class="icon"><use href="#i-music"/></svg><span>Tracks</span><span class="nav-hint">05</span></a>
+      <a class="nav-item" href="#matrices" data-nav="matrices"><svg class="icon"><use href="#i-matrix"/></svg><span>Matrices</span><span class="nav-hint">06</span></a>
+      {{if .LocalMode}}<a class="nav-item" href="#local-index" data-nav="local-index"><svg class="icon"><use href="#i-database"/></svg><span>Local index</span><span class="nav-hint">07</span></a>{{end}}
+      <a class="nav-item" href="#diagnostics" data-nav="diagnostics"><svg class="icon"><use href="#i-diagnostics"/></svg><span>Diagnostics</span><span class="nav-hint">{{if .LocalMode}}08{{else}}07{{end}}</span></a>
     </nav>
 
     <div class="side-card">
@@ -678,15 +679,36 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
             <div class="metric-card"><h3>Languages</h3><div class="bars" id="languageBars"></div></div>
             <div class="metric-card"><h3>Lyrics backends</h3><div class="bars" id="backendBars"></div></div>
             <div class="metric-card"><h3>Similarity weights</h3><div class="bars" id="weightBars"></div></div>
-            <div class="metric-card"><h3>Language filter</h3><div class="chips" id="allowedList"></div><h3 style="margin-top:12px">Data files</h3><div class="chips" id="dataFiles"></div></div>
+            <div class="metric-card"><h3>Data files</h3><div class="chips" id="dataFiles"></div></div>
           </div>
           <div class="metric-card" style="margin-top:12px"><h3>Lyrics provider fallback chain</h3><div class="provider-chain" id="providersList"></div></div>
           <div class="metric-card" style="margin-top:12px"><h3>Top terms by document frequency</h3><div class="chips" id="topTerms"></div></div>
         </section>
 
+        <section class="panel" id="tracks">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Library</span>
+              <h2>Indexed tracks</h2>
+              <div class="sub">Every committed song, read straight from the serving replica. This dashboard never queries a database.</div>
+            </div>
+            <div class="panel-actions">
+              <input class="input" id="trackFilter" type="search" placeholder="Filter title or artist" aria-label="Filter tracks" style="min-width:220px">
+              <button class="btn btn-ghost btn-sm" id="refreshTracks" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Reload</button>
+            </div>
+          </div>
+          <div class="table-scroll" style="margin-top:14px">
+            <table>
+              <thead><tr><th>Title</th><th>Artist</th><th>Language</th><th>Provider</th><th>Duration</th></tr></thead>
+              <tbody id="trackRows"><tr><td colspan="5" class="empty-table">No committed tracks yet.</td></tr></tbody>
+            </table>
+          </div>
+          <div class="matrix-meta" id="trackMeta"></div>
+        </section>
+
         <section class="panel" id="matrices">
           <div class="panel-head">
-            <div><span class="eyebrow">Matrices</span><h2>The similarity graph</h2><div class="sub">A centrality-ranked preview. The full matrices stay on the API — the dashboard only pulls a small read-only slice.</div></div>
+            <div><span class="eyebrow">Matrices</span><h2>Local similarity preview</h2><div class="sub">Only the standalone local indexer can compute this; the cloud replica serves pre-computed LLM embeddings and keeps no matrices.</div></div>
             <div class="panel-actions"><button class="btn btn-ghost btn-sm" id="refreshMatrices" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Reload</button></div>
           </div>
           <div class="matrix-tabs" id="matrixTabs"></div>
@@ -700,8 +722,8 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
           <div class="panel-head">
             <div>
               <span class="eyebrow">Local persistence</span>
-              <h2>Qwen3 vocabulary &amp; inverted index</h2>
-              <div class="sub">Only two files live on this laptop: the Qwen3-Embedding-0.6B vocabulary and the full inverted index built from it. Tracks, embeddings and jobs stay in Atlas/Qdrant.</div>
+              <h2>Embeddings &amp; local engine</h2>
+              <div class="sub">The local indexer runs core.py: songs go to Atlas, Qwen3-Embedding-0.6B vectors go to Qdrant. Publish re-upserts both; the cloud replica only reads them.</div>
             </div>
             <div class="panel-actions">
               <button class="btn btn-ghost btn-sm" id="refreshLocal" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Refresh</button>
@@ -714,7 +736,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
             <div class="local-cell"><b id="localDocs">—</b><span>documents</span><code id="localDir">—</code></div>
             <div class="local-cell"><b id="localUpdated">—</b><span>last rebuild</span><code id="localEmbed">—</code></div>
           </div>
-          <div class="form-row" style="margin-top:12px"><span class="hint-inline" id="publishMsg">Publishing re-upserts the committed index into Atlas and Qdrant; commits also rewrite these files over gRPC.</span></div>
+          <div class="form-row" style="margin-top:12px"><span class="hint-inline" id="publishMsg">Publishing re-upserts songs into Atlas and LLM embeddings into Qdrant over gRPC.</span></div>
         </section>
         {{end}}
 
@@ -886,7 +908,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
   var EVENT_TONES = {
     connected: "info", start: "active", status: "active", extracted: "success",
     song: "success", song_retry: "success", song_error: "error", filtered: "warn",
-    language_skipped: "warn", stashed: "success", queued: "success",
+    stashed: "success", queued: "success",
     queued_batch: "success", queued_job: "success", skipped: "warn",
     recovered: "warn", retry_scheduled: "warn", requeued: "warn",
     gave_up: "error", done: "success", error: "error", pong: "info"
@@ -894,7 +916,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
   var EVENT_TEXT = {
     connected: "connected", start: "job started", status: "stage", extracted: "extracted",
     song: "song scraped", song_retry: "lyric retry", song_error: "song failed",
-    filtered: "commit filter", language_skipped: "language skipped", stashed: "stash ready",
+    filtered: "commit filter", stashed: "stash ready",
     queued: "queued", queued_batch: "queued batch", skipped: "skipped",
     recovered: "recovered", retry_scheduled: "retry scheduled", requeued: "requeued",
     gave_up: "gave up", done: "done", error: "error", pong: "pong"
@@ -1104,15 +1126,12 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
       statTile("Vocabulary", num(s.vocabulary_size), "database"),
       statTile("Inverted terms", num(s.inverted_terms), "matrix"),
       statTile("Lyric tokens", num(s.lyrics_tokens), "sparkles"),
-      statTile("Matrix", (s.matrix_shape || [0, 0]).join(" × "), "overview")
+      statTile("Matrix", (s.matrix_shape || [0, 0]).join(" × "), "overview"),
+      statTile("Index revision", num(s.revision), "refresh")
     ].join("");
 
     $("matrixShapeChip").textContent = (s.matrix_shape || [0, 0]).join(" × ");
-    var allowed = s.allowed_languages || [];
-    $("allowedChip").textContent = allowed.length ? allowed.join(" + ") + " only" : "all languages";
-    $("allowedList").innerHTML = allowed.length
-      ? allowed.map(function (code) { return '<span class="chip good">' + esc(code) + '</span>'; }).join("")
-      : '<span class="chip good">any language</span>';
+    $("allowedChip").textContent = "all languages";
 
     bars($("languageBars"), s.languages, 10);
     bars($("backendBars"), s.backends, 10);
@@ -1162,6 +1181,8 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
       var status = String(job.status || job.stage || "unknown");
       var tone = statusTone(status);
       var detail = job.reason || job.error || "";
+      if (job.error_code) detail = "[" + job.error_code + "] " + detail;
+      if (job.retry_mode) detail += " · retry: " + job.retry_mode;
       var stage = job.stage || "—";
       var url = job.url || "";
       return '<tr>' +
@@ -1280,6 +1301,43 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
   }
 
   /* ---------------------------------------------------------------- matrices */
+
+  var TRACKS = [];
+
+  async function loadTracks() {
+    var response = await fetch(API + "/tracks?limit=500", { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error("tracks HTTP " + response.status);
+    var data = await response.json();
+    TRACKS = data.tracks || [];
+    renderTracks(data.total || TRACKS.length);
+  }
+
+  function renderTracks(total) {
+    var filter = (($("trackFilter") && $("trackFilter").value) || "").toLowerCase().trim();
+    var rows = TRACKS.filter(function (track) {
+      if (!filter) return true;
+      return ((track.title || "") + " " + (track.artist || "")).toLowerCase().indexOf(filter) >= 0;
+    });
+    if ($("trackMeta")) {
+      $("trackMeta").textContent = rows.length + " of " + num(total) + " tracks";
+    }
+    if (!rows.length) {
+      $("trackRows").innerHTML = '<tr><td colspan="5" class="empty-table">No tracks match that filter.</td></tr>';
+      return;
+    }
+    $("trackRows").innerHTML = rows.map(function (track) {
+      var seconds = Math.round(Number(track.duration) || 0);
+      var duration = seconds > 0 ? Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0") : "—";
+      return "<tr>" +
+        "<td><b>" + esc(track.title || track.video_id) + "</b></td>" +
+        "<td>" + esc(track.artist || "—") + "</td>" +
+        "<td><code>" + esc(track.language || "—") + "</code></td>" +
+        "<td>" + esc(track.backend || "—") + "</td>" +
+        "<td>" + duration + "</td>" +
+        "</tr>";
+    }).join("");
+  }
+
   async function loadMatrices(force) {
     if (state.matrices && !force) return state.matrices;
     var response = await fetch(API + "/matrices/preview?size=16", { headers: { "Accept": "application/json" } });
@@ -1351,7 +1409,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
         break;
       case "connected":
         setWs("live", "live");
-        logEvent("connected", "Stream ready · " + num(d.indexed_songs) + " songs already indexed");
+        logEvent("connected", "Stream ready · " + num(d.indexed_songs) + " songs already indexed", "revision " + num(d.revision));
         break;
       case "start":
         setBusy(true, d.action);
@@ -1385,10 +1443,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
         logEvent("song_error", "#" + d.index + "/" + d.total + " " + d.video_id + " failed", d.message || "");
         break;
       case "filtered":
-        logEvent("filtered", "Kept " + num(d.kept) + " · skipped " + num(d.skipped) + " songs", (d.no_lyrics !== undefined ? d.no_lyrics + " without lyrics" : "") + (d.language_skipped !== undefined ? " · " + d.language_skipped + " outside " + (d.allowed_languages || []).join("/") : ""));
-        break;
-      case "language_skipped":
-        logEvent("language_skipped", (d.artist || "") + " — " + (d.title || ""), "language " + (d.language || "?") + " not committed");
+        logEvent("filtered", "Kept " + num(d.kept) + " · skipped " + num(d.skipped) + " songs", (d.no_lyrics !== undefined ? d.no_lyrics + " without lyrics" : "every language is indexable"));
         break;
       case "stashed":
         setProgress(90, "Stashed", "Batch waiting for the matrix worker", num(d.docs) + " songs", "active");
@@ -1459,6 +1514,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
       refreshStats().catch(function () {});
       refreshCache().catch(function () {});
       loadMatrices(true).catch(function () {});
+    loadTracks().catch(function () {});
     }, 900);
   }
 
@@ -1466,7 +1522,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
   async function refreshAll(options) {
     var quiet = options && options.quiet;
     var results = await Promise.allSettled([
-      refreshStats(), refreshQueue(), refreshCache(), loadMatrices(false), refreshLocalIndex()
+      refreshStats(), refreshQueue(), refreshCache(), loadTracks(), loadMatrices(false), refreshLocalIndex()
     ]);
     var failed = results.filter(function (result) {
       return result.status === "rejected" && (!result.reason || !result.reason.status || result.reason.status >= 500);
@@ -1545,7 +1601,16 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
   $("refreshAll").addEventListener("click", function () {
     refreshAll({ quiet: false });
     loadMatrices(true).catch(function () {});
+    loadTracks().catch(function () {});
   });
+  if ($("refreshTracks")) {
+    $("refreshTracks").addEventListener("click", function () {
+      loadTracks().then(function () { toast("Track list reloaded"); }).catch(function (error) { toast(error.message, "error"); });
+    });
+  }
+  if ($("trackFilter")) {
+    $("trackFilter").addEventListener("input", function () { renderTracks(TRACKS.length); });
+  }
   $("refreshMatrices").addEventListener("click", function () {
     loadMatrices(true).then(function () { toast("Matrix preview reloaded"); }).catch(function (error) { toast(error.message, "error"); });
   });

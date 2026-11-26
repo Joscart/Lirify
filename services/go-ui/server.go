@@ -38,9 +38,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /api/config", s.config)
 	mux.HandleFunc("GET /api/stats", s.stats)
+	// Alias so `/stats` does not silently 404 on the dashboard host; the
+	// python-backend route with the same name lives on a different origin.
+	mux.HandleFunc("GET /stats", s.stats)
 	mux.HandleFunc("GET /api/queue", s.queue)
 	mux.HandleFunc("GET /api/cache", s.cache)
 	mux.HandleFunc("GET /api/matrices/preview", s.matrixPreview)
+	mux.HandleFunc("GET /api/tracks", s.tracks)
 	mux.HandleFunc("GET /api/events", s.events)
 	// Mutating routes exist only for the laptop dashboard. On Cloud Run every one
 	// of them answers 403 without dialling python-backend.
@@ -202,6 +206,44 @@ func (s *Server) cache(w http.ResponseWriter, r *http.Request) {
 		"max_attempts":           payload.MaxAttempts,
 		"retry_interval_seconds": payload.RetryIntervalSeconds,
 		"failed":                 failed,
+	})
+}
+
+// tracks is the read-only catalogue view: every committed song with the metadata
+// the indexer published (title, artist, language, duration).
+func (s *Server) tracks(w http.ResponseWriter, r *http.Request) {
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	ctx, cancel := s.client.context(r.Context())
+	defer cancel()
+	payload, err := s.client.api.ListTracks(ctx, &lirifypb.ListTracksRequest{
+		Offset: int32(offset),
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		writeRPCError(w, err)
+		return
+	}
+	rows := make([]map[string]any, 0, len(payload.Tracks))
+	for _, track := range payload.Tracks {
+		rows = append(rows, map[string]any{
+			"video_id": track.VideoId,
+			"title":    track.Title,
+			"artist":   track.Artist,
+			"language": track.Language,
+			"backend":  track.Backend,
+			"duration": track.Duration,
+			"thumb":    track.Thumb,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total":  payload.Total,
+		"offset": offset,
+		"limit":  limit,
+		"tracks": rows,
 	})
 }
 
@@ -442,6 +484,7 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"published":        payload.Published,
+		"unchanged":        payload.Unchanged,
 		"songs":            payload.Songs,
 		"vectors":          payload.Vectors,
 		"vocabulary_terms": payload.VocabularyTerms,
@@ -477,6 +520,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		"event":         "connected",
 		"indexed_songs": snapshot["indexed_songs"],
 		"queue":         snapshot["queue"],
+		"revision":      snapshot["revision"],
 		"ts":            time.Now().Unix(),
 	})
 	flusher.Flush()
@@ -602,6 +646,7 @@ func statsJSON(payload *lirifypb.IndexStats) map[string]any {
 		},
 		"files":              files,
 		"generated_at":       payload.GeneratedAt,
+		"revision":           payload.Revision,
 		"serve_only":         payload.ServeOnly,
 		"mode":               payload.Mode,
 		"embedding_provider": payload.EmbeddingProvider,
@@ -633,6 +678,8 @@ func jobJSON(job *lirifypb.Job) map[string]any {
 		"status":     job.Status,
 		"stage":      job.Stage,
 		"error":      job.Error,
+		"error_code": job.ErrorCode,
+		"retry_mode": job.RetryMode,
 		"added":      job.Added,
 		"attempts":   job.Attempts,
 		"source":     job.Source,

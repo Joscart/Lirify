@@ -7,10 +7,10 @@ CI cannot create for itself.
 Work top to bottom. Steps 1–6 are one-time. Steps 7–9 are the first deploy; step
 10 is the laptop indexing stack.
 
-> **Two stacks, one contract.** Cloud Run hosts only the three read-only serving
-> services (`python-backend` with `SERVE_ONLY=true`, `astro-webui`, `go-webui`
-> with `DASHBOARD_MODE=readonly`). Indexing and embedding run on the laptop
-> (`llama.cpp` + `local-indexer` + `local-ui`), which is the only writer of
+> **Two independent stacks, one contract.** Cloud Run hosts only the three
+> read-only serving services (`python-backend`, `astro-webui`, `go-webui` with
+> `DASHBOARD_MODE=readonly`). Indexing, embedding and publishing run in the
+> standalone laptop `local-indexer` (+ `local-ui`), which is the only writer of
 > Atlas/Qdrant. See `docs/ARCHITECTURE.md`.
 
 
@@ -188,10 +188,9 @@ This value is the bearer token AI agents use. It is stored in Secret Manager as
 Optionally create a `production` environment (Settings → Environments) and add
 required reviewers if you want manual approval on deploys.
 
-> The bot key no longer enables indexing on Cloud Run: the ingestion router is
-> not mounted when `SERVE_ONLY=true`. It now authorises `POST /admin/reload`
-> (used after a local publish) and any HTTP bot surface you run yourself with
-> `SERVE_ONLY=false`.
+> The bot key no longer enables indexing on Cloud Run: there is no ingestion
+> router in the serving image. `/admin/reload` is unauthenticated and only
+> re-reads committed songs after a local publish.
 
 ### Workflow permissions
 
@@ -231,8 +230,9 @@ domains come next.
 ```bash
 API=$(gcloud run services describe lirify-api --region us-central1 --format='value(status.url)')
 
-curl -s "$API/health"                       # {"status":"ok","mode":"serve-only",...}
-curl -s "$API/stats" | head -c 400
+curl -s "$API/health"                       # liveness: {"status":"ok","mode":"serve-only",...}
+curl -s -w '\n%{http_code}\n' "$API/readyz" # readiness: store + gRPC + index (503 until ready)
+curl -s "$API/stats" | head -c 400          # revision, weights, vectors store
 curl -s "$API/api/v1/bot/health" -H "Authorization: Bearer $BOT_INGEST_API_KEY"
 
 # The serving replica must refuse writes:
@@ -319,93 +319,93 @@ The services keep using their `*.run.app` URLs for server-to-server traffic
 > NEG gives one IP, Cloud Armor and certificates with DNS authorization. Domain
 > mapping is used here because it is free and needs no load balancer.
 
-## 10. Local indexing stack (laptop, RTX 2050 4 GB)
+## 10. Local indexing stack (standalone, laptop)
 
-Everything that mutates the index runs here. The cloud stack stays read-only.
+Everything that mutates the index runs here. The cloud stack stays read-only and
+the two stacks never call each other: the indexer publishes straight into Atlas
+and Qdrant.
 
-### 10.1 Hardware and driver prerequisites
+### 10.1 GPU prerequisites
 
-- NVIDIA driver + Container Toolkit (`nvidia-smi` works inside Docker).
-- The laptop's 4 GB RTX 2050 is shared with the compositor. Keep the llama.cpp
-  context small and do not run local-ui/model downloads during a game.
-
-### 10.2 Download the model and tokenizer once
+`core.py` embeds with sentence-transformers, so the container needs the NVIDIA
+runtime:
 
 ```bash
-scripts/local/fetch_qwen3_embedding.sh
-# -> models/qwen3-embedding/Qwen3-Embedding-0.6B-Q8_0.gguf
-# -> models/qwen3-embedding/tokenizer.json
+sudo pacman -S --needed nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+
+# Gate: this must print the RTX 2050 before the compose stack can use it.
+docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
 ```
 
-Q8_0 is ~0.65 GB. If VRAM is tight, swap the GGUF for
-`Qwen3-Embedding-0.6B-Q4_K_M.gguf` from the same repo and update the compose
-command; quality drops slightly.
+The model is `Qwen/Qwen3-Embedding-0.6B` (~1.2 GB) and is cached in the
+`hf_cache` volume on first start. Deleting that volume forces a re-download.
 
-### 10.3 Start llama.cpp + local-indexer + local-ui
+### 10.2 Start local-indexer + local-ui
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml \
-  up -d --build llama local-indexer local-ui
+  up -d --build local-indexer local-ui
 ```
 
 | Service | Port | Notes |
 | --- | --- | --- |
-| `llama` | `8081` → container `8080` | `--embedding --pooling last`, `-c 2048 -b 256 -ub 256 -ngl 99`, Q8_0 |
-| `local-indexer` | `50052` → container `50051` | gRPC only, `SERVE_ONLY=0`, writes Atlas + Qdrant |
+| `local-indexer` | `50052` → container `50051` | gRPC only; ingestion + `core.py` + Atlas/Qdrant writes |
 | `local-ui` | `8090` | `DASHBOARD_MODE=local`, the same dashboard plus controls |
 
 `local-indexer` reads `MONGODB_URI` / `QDRANT_URL` / `QDRANT_API_KEY` from `.env`
-and overrides:
+and sets:
 
 ```
-SERVE_ONLY=0
-LLAMA_EMBED_URL=http://llama:8080
-QWEN3_TOKENIZER_PATH=/models/qwen3-embedding/tokenizer.json
+EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
+EMBEDDING_DIM=1024
 QDRANT_COLLECTION=lirify_lyrics_qwen3
-QDRANT_VECTOR_SIZE=1024
-LOCAL_INDEX_DIR=/data/local-index
+PUBLISH_ON_INDEX=1
+LOAD_ON_START=1
 ```
 
-Check the GPU before the first index run:
+`LOAD_ON_START=1` rehydrates committed songs from Atlas, so restarts keep the
+library and duplicate detection. `PUBLISH_ON_INDEX=1` publishes after every
+committed playlist.
 
-```bash
-nvidia-smi --query-gpu=memory.used,memory.total --format=csv
-docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml logs -f llama
-curl -s http://localhost:8081/health
-```
-
-### 10.4 Index and publish
+### 10.3 Index and publish
 
 1. Open <http://localhost:8090>.
 2. Paste a playlist URL → **Index now** (or queue several).
-3. Watch progress in **Live events**; commits are written straight to
-   Atlas/Qdrant and bump `index_stats.revision`.
-4. **Publish to cloud** re-upserts the committed index into Atlas/Qdrant and
-   rebuilds the two local files (`vocabulary.json`, `inverted_index.json`).
-   Every commit already does this via the commit hook, so publish is mainly for
-   a first backfill or after switching the Qdrant collection.
-5. The cloud replica picks up the new revision within
+3. Progress appears in **Live events**; a commit writes songs to Atlas, LLM
+   embeddings to Qdrant and bumps `index_stats.revision`.
+4. **Publish to cloud** re-runs the same write for the whole in-memory index.
+   It is mainly for a first backfill or after switching the Qdrant collection.
+   An unchanged index is simply re-upserted; there is no local fingerprint file.
+5. The cloud replica notices the new revision within
    `INDEX_REFRESH_SECONDS`/`INDEX_CHECK_SECONDS`; to force it:
 
 ```bash
 API=$(gcloud run services describe lirify-api --region us-central1 --format='value(status.url)')
-curl -s -X POST "$API/admin/reload" -H "Authorization: Bearer $BOT_INGEST_API_KEY"
+curl -s -X POST "$API/admin/reload"
 ```
 
-### 10.5 Local artefacts
+### 10.4 What is stored where
 
-Only two files are allowed on disk, under `/data/local-index` (compose volume)
-or `./local-index` (direct run):
-
-| File | Shape |
+| State | Home |
 | --- | --- |
-| `vocabulary.json` | `{tokenizer, terms: {subword: term_id}, documents}` |
-| `inverted_index.json` | `{terms: {term_id: {term, postings: {videoId: [positions]}}}}` |
+| Tracks + `index_stats` | Atlas (`songs`, `index_stats`) |
+| Qwen3-Embedding-0.6B vectors | Qdrant `lirify_lyrics_qwen3` |
+| Terms, inverted index, TF-IDF | `local-indexer` process memory |
 
-Both are written atomically by `services/local-indexer/local_store.py`. Do not
-add song dumps or local caches: tracks live in Atlas.
+No matrices are stored in either database and no container writes to disk. There
+are no `vocabulary.json` / `inverted_index.json` files to manage.
 
----
+### 10.5 Inspect the local engine
+
+```bash
+grpcurl -proto proto/lirify.proto -plaintext localhost:50052 \
+  lirify.v1.LirifyIndexerService/GetLocalIndex
+
+docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml \
+  logs -f local-indexer
+```
 
 ## 11. Day-2 operations
 
@@ -445,10 +445,10 @@ versions. Cloud Run `max_instances = 1` prevents runaway scaling.
 | Web UI shows API offline, `/healthz` 200 | `GRPC_TARGET` wrong or python cold | Check `gcloud run services describe lirify-web --format=yaml | grep GRPC_TARGET`; first request after idle takes ~5 s. |
 | gRPC calls fail with `PermissionDenied` | `python_public = false` | Set it back to `true`, or give the web UIs ID-token auth. |
 | `stats` shows `storage.tracks = memory` | `MONGODB_URI` not injected | Check the Secret Manager version exists and the revision has the env var. |
-| Recommendations always empty | Qdrant unreachable, empty, or wrong collection | `storage.vectors` must be `qdrant`; confirm `QDRANT_COLLECTION=lirify_lyrics_qwen3` on **both** stacks and run **Publish to cloud** once. |
-| `403 read_only_serving_instance` on `/index` | Cloud api is `SERVE_ONLY=true` | Expected: index from the laptop stack. |
+| Recommendations always empty | Qdrant unreachable, empty, or wrong collection | `storage.vectors` must be `qdrant`; confirm `QDRANT_COLLECTION=lirify_lyrics_qwen3` and run **Publish to cloud** from `local-ui`. |
+| `403` on `/index` | Cloud api is read-only | Expected: index from the laptop stack. |
 | `UNIMPLEMENTED` on `IndexPlaylist` | Serving replica has indexing disabled | Expected: call `local-indexer:50051` instead. |
-| `503` / empty vectors after switching to Qwen3 | 1024-dim collection not published yet | Run **Publish to cloud**; do not reuse the 256-dim collection. |
+| `503` / empty vectors after switching models | 1024-dim collection not published yet | Run **Publish to cloud**; use a new `QDRANT_COLLECTION`, never the 256-dim one. |
 | Index job fails with `bot_check` | YouTube anti-bot challenge on the laptop egress | Retry later, or pass cookies to yt-dlp via a custom image. |
 | Index job fails: `Index capacity guard` | `Index capacity guard` | The service serves the newest `MAX_INDEXED_SONGS` (default 3000); raise the limit **and** memory, or prune. Measured: 1000 songs ≈ 227 MB RSS, 1661 ≈ 401 MB. |
 | Certificate stays `Provisioning` | DNS missing/typo'd (check the double-i host) | Fix DNS; re-check `gcloud run domain-mappings describe`. |

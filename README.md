@@ -2,28 +2,27 @@
 
 A lyrics-first music index and player. Public YouTube playlists are scraped,
 lyrics are resolved, tracks with lyrics are kept (any language), and the result
-powers similarity search, recommendations and synced lyrics.
+powers search, recommendations and synced lyrics.
 
-Lirify is two stacks sharing one gRPC contract and one pair of databases:
+Lirify is two independent stacks sharing one gRPC contract and one pair of
+databases:
 
 | Stack | Services | Role |
 | --- | --- | --- |
-| **Cloud serving** (read-only) | `astro-webui`, `go-webui`, `python-backend` (`SERVE_ONLY=true`) | Search, recommend, lyrics, player, stats. Never scrapes, embeds or writes index state. |
-| **Local indexing** (laptop, RTX 2050 4 GB) | `llama.cpp` + `local-indexer` + `local-ui` | Full pipeline, Qwen3-Embedding-0.6B embeddings, Atlas/Qdrant writes, local vocabulary + inverted index. |
+| **Cloud serving** (read-only) | `astro-webui`, `go-webui`, `python-backend` | Serve committed songs + pre-computed LLM embeddings. No scraping, no embeddings, no matrices, no index writes. |
+| **Local indexing** (laptop) | `local-indexer` + `local-ui` | `core.py` pipeline: scrape → terms → Qwen3-Embedding-0.6B → Atlas + Qdrant. |
 
 | Service | URL | Stack |
 | --- | --- | --- |
-| `astro-webui` | https://lirify.joscart.win | Astro SSR player (gRPC client) |
-| `go-webui` | https://index.joscart.win | Go stats/health dashboard (`DASHBOARD_MODE=readonly`) |
+| `astro-webui` | https://lirify.joscart.win | Astro SSR player; Cloudflare Workers AI search, gRPC recommendations |
+| `go-webui` | https://index.joscart.win | Read-only dashboard (`DASHBOARD_MODE=readonly`) |
 | `python-backend` | Cloud Run, private URL | FastAPI + gRPC (h2c), read-only serving |
 | `local-ui` | http://localhost:8090 | Same Go dashboard with index/publish controls |
-| `local-indexer` | gRPC `:50052` → `:50051` | Writer: pipeline + llama.cpp embeddings |
-| `llama-server` | http://localhost:8081 | Qwen3-Embedding-0.6B (GGUF, CUDA) |
+| `local-indexer` | gRPC `:50052` → `:50051` | Ingestion, `core.py`, sentence-transformers embeddings, cloud writes |
 
 - **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - **Deployment runbook:** [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 - **Database schema:** [`docs/MONGODB_SCHEMA.md`](docs/MONGODB_SCHEMA.md)
-- **Agent skill:** [`skills/lirify-playlist-indexer/SKILL.md`](skills/lirify-playlist-indexer/SKILL.md) (retired HTTP path; see its banner)
 
 ## Contract first
 
@@ -36,29 +35,44 @@ and generated into Python, Go and TypeScript:
 ```
 
 Generated code is committed (`services/api/app/lirifypb`,
-`services/go-ui/internal/lirifypb`, `services/web/src/generated`) so builds stay
-reproducible and offline-friendly. Never hand-edit it.
+`services/go-ui/internal/lirifypb`, `services/web/src/generated`). Never
+hand-edit it.
 
-`LirifyService` carries both read and index RPCs, so the local dashboard and the
-cloud services speak one contract. `LirifyIndexerService` adds the two
-laptop-only operations: `PublishToCloud` and `GetLocalIndex`.
+`LirifyService` carries read + index RPCs, so the local dashboard and the cloud
+services speak one contract. `LirifyIndexerService` adds `PublishToCloud` and
+`GetLocalIndex` and is registered only by `local-indexer`.
 
-## Stateless serving, local writes
+## `core.py` is the engine
 
-Cloud Run may recycle a container at any time, so the cloud containers write
-nothing to disk. The laptop indexer is the only writer:
+`services/local-indexer/core.py` owns the whole index: text pipeline, terms,
+inverted index, TF-IDF matrices (memory only), Qwen3 embeddings, `buscar()`,
+`recomendar()`, `estadisticas()` and `publicar()`. The cloud API has no copy of
+that logic; it reads the published state.
 
-| State | Owner |
-| --- | --- |
-| Tracks, jobs, stashes, caches, stats, `revision` | MongoDB Atlas (`local-indexer` writes) |
-| Qwen3 lyric embeddings (1024-dim) | Qdrant Cloud `lirify_lyrics_qwen3` (`local-indexer` writes) |
-| Qwen3 vocabulary | `local-index/vocabulary.json` (laptop only) |
-| Full inverted index (term id → postings) | `local-index/inverted_index.json` (laptop only) |
-| TF-IDF matrices | process memory, rebuilt from Atlas on boot |
-| Listening/search history, playback session | the browser (`localStorage`) |
+Database ownership:
 
-No song dumps or local caches are written; the two files above are the only local
-artefacts. The legacy `data/*.json` files are unused.
+| State | Home | Writer |
+| --- | --- | --- |
+| Tracks (title, artist, lyrics, language) | Atlas `songs` | `local-indexer` |
+| Index statistics + `revision` | Atlas `index_stats` | `local-indexer` |
+| Resolved media durations | Atlas `media_durations` | `python-backend` (player metadata) |
+| Qwen3-Embedding-0.6B vectors (1024-dim) | Qdrant `lirify_lyrics_qwen3` | `local-indexer` |
+| Terms, TF-IDF, similarity matrices | local process memory | `core.py` |
+| Listening/search history | browser `localStorage` | browser |
+
+Only songs and LLM embeddings are published. No matrices reach the cloud and no
+container writes to disk.
+
+## Recommendations and web search
+
+- **Recommendations** use the pre-computed embeddings only: Qdrant cosine
+  neighbours per seed, blended with `.10` title / `.05` artist Jaccard
+  (`.85` lyrics). Weights live in `python-backend` (`main.WEIGHTS`).
+- **Web search** is understood by Cloudflare Workers AI: Astro asks the Worker
+  (or the Workers AI REST API) for 1–3 catalogue keywords, then runs one gRPC
+  `Search` per keyword and merges by score. Configure `CF_WORKER_URL`, or
+  `CF_ACCOUNT_ID` + `CF_API_TOKEN`; without them the route falls back to lexical
+  search.
 
 ## Run the cloud serving stack locally
 
@@ -72,81 +86,37 @@ docker compose up -d --build
 docker compose -f docker-compose.yml -f docker-compose.local-db.yml up -d --build
 ```
 
-The serving stack is `api`, `web` and `go-ui` only; the `local-db` overlay adds
-`mongo`, `db-init` and `qdrant`. `api` runs with `SERVE_ONLY=true`: `/index`,
-`/queue`, `/extract`, `/retry` and the bot ingestion routes answer `403`, every
-indexing gRPC RPC answers `UNIMPLEMENTED`, and only the revision poller runs.
-
 - Player: http://localhost:4321
 - Read-only dashboard: http://localhost:8080
 - API docs: http://localhost:8000/docs
 
-## Run the local indexing stack (laptop)
+`api` is read-only: `/index`, `/queue`, `/extract`, `/retry` and the bot routes
+answer `403`; indexing gRPC RPCs answer `UNIMPLEMENTED`.
 
-Download the model + tokenizer once (Q8_0, ~0.65 GB):
+## Run the standalone local indexer
 
-```bash
-scripts/local/fetch_qwen3_embedding.sh
-```
-
-Then, with `nvidia-smi` working inside Docker:
+The first start downloads `Qwen/Qwen3-Embedding-0.6B` into the `hf_cache` volume
+(~1.2 GB, cached afterwards).
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml \
-  up -d --build llama local-indexer local-ui
+  up -d --build local-indexer local-ui
 
-# containerised databases + local indexer (no Atlas/Qdrant Cloud):
-docker compose -f docker-compose.yml -f docker-compose.local-db.yml \
-  -f docker-compose.local-indexer.yml up -d --build llama local-indexer local-ui
+# Dashboard with controls: http://localhost:8090
+# Indexing gRPC:            localhost:50052
 ```
 
-- Dashboard with controls: http://localhost:8090
-- llama.cpp embeddings: http://localhost:8081 (`/v1/embeddings`)
-- Indexing gRPC: `localhost:50052`
-
-The overlay sets `SERVE_ONLY=0`, `LLAMA_EMBED_URL=http://llama:8080`,
-`QWEN3_TOKENIZER_PATH=/models/qwen3-embedding/tokenizer.json`,
-`QDRANT_COLLECTION=lirify_lyrics_qwen3`, `QDRANT_VECTOR_SIZE=1024` and
-`LOCAL_INDEX_DIR=/data/local-index`. Index a playlist from the dashboard, then
-use **Publish to cloud** for a first backfill or after switching collections.
-
-### llama.cpp budget for the RTX 2050
-
-The compose service runs:
-
-```
---embedding --pooling last --ctx-size 2048 --batch-size 256 --ubatch-size 256 \
---parallel 1 --n-gpu-layers 99
-```
-
-Q8_0 weights (~0.65 GB) plus KV/compute buffers fit in 4 GB next to the
-compositor. Check `nvidia-smi` during the first run; raise `-c`/`-b` only with
-headroom. `LLAMA_EMBED_BATCH=8` and `LLAMA_EMBED_MAX_CHARS=6000` bound the
-client side. `Q4_K_M` is the fallback if another workload occupies VRAM.
-
-## Embeddings, tokens and similarity
-
-- Text is embedded by llama.cpp with **Qwen3-Embedding-0.6B** (1024 dims).
-- The exact `Qwen/Qwen3-Embedding-0.6B` tokenizer builds the local vocabulary,
-  the full inverted index, and the term sets used by title/artist Jaccard.
-- `WEIGHTS = {"name": 0.10, "artist": 0.05, "lyrics": 0.85}`. Jaccard is used
-  **only** for the title and artist signals; lyrics is TF-IDF cosine. Language is
-  not a similarity dimension, and no language is filtered out of the index.
-
-```
-unified = .10 * jaccard(title terms)
-        + .05 * jaccard(artist terms)
-        + .85 * cosine(TF-IDF lyrics)
-```
-
-The unified matrix is peak-normalised. Title/artist Jaccard uses Qwen3 subword
-sets when the tokenizer is loaded and falls back to whitespace tokens otherwise.
+The indexer reads `MONGODB_URI`, `QDRANT_URL` and `QDRANT_API_KEY` from `.env`,
+hydrates committed songs from Atlas at startup, and publishes after every
+committed playlist (`PUBLISH_ON_INDEX=1`). Publish again from the dashboard to
+backfill a new embedding collection.
 
 ## Verify
 
 ```bash
 ./scripts/gen_proto.sh --check
 python3 -m py_compile services/api/app/*.py services/local-indexer/*.py
+(cd services/local-indexer && python3 -m unittest discover -s tests -p 'test_*.py')
 (cd services/go-ui && go build ./... && go vet ./...)
 (cd services/web && npm run build)
 ```
@@ -154,14 +124,14 @@ python3 -m py_compile services/api/app/*.py services/local-indexer/*.py
 Smoke test:
 
 ```bash
-curl localhost:8000/health          # mode=serve-only
-curl localhost:8000/stats           # serve_only: true
+curl localhost:8000/health          # liveness; mode=serve-only, revision
+curl localhost:8000/readyz          # readiness: Atlas hydrated (503 until ready)
+curl localhost:8000/stats           # serve_only: true, vectors: qdrant
 curl -o /dev/null -w '%{http_code}\n' -X POST localhost:8000/index \
   -H 'Content-Type: application/json' -d '{"url":"https://youtu.be/xxxxxxxxxxx"}'   # 403
-curl localhost:8080/health          # go-webui process + mode
-curl localhost:8080/readyz          # go-webui -> gRPC -> python-backend
+curl localhost:8080/api/stats       # go-webui JSON
+curl localhost:8080/api/tracks      # every committed track
 curl localhost:4321/health          # astro-webui
-curl -H "Authorization: Bearer $BOT_INGEST_API_KEY" localhost:8000/api/v1/bot/health
 ```
 
 gRPC end to end:
@@ -170,76 +140,16 @@ gRPC end to end:
 grpcurl -proto proto/lirify.proto -plaintext localhost:8000 \
   lirify.v1.LirifyService/GetIndexStats
 
-# local indexer (both services on one port)
 grpcurl -proto proto/lirify.proto -plaintext localhost:50052 \
   lirify.v1.LirifyIndexerService/GetLocalIndex
 ```
 
-## Indexing entry points (local only)
+## Index a playlist (local only)
 
 ```bash
-# Dashboard
-open http://localhost:8090
-
-# gRPC (grpcurl on the host; the local-indexer has no HTTP surface)
-grpcurl -proto proto/lirify.proto -plaintext \
-  -d '{"playlist_urls":["https://www.youtube.com/playlist?list=..."],"source":"local-ui"}' \
-  localhost:50052 lirify.v1.LirifyService/QueuePlaylists
-
-# HTTP (only when you run the API yourself with SERVE_ONLY=false)
-curl -X POST localhost:8000/queue -H 'Content-Type: application/json' \
-  -d '{"urls": ["https://www.youtube.com/playlist?list=..."]}'
+grpcurl -proto proto/lirify.proto -plaintext localhost:50052 \
+  -d '{"playlist_urls":["<url>"]}' lirify.v1.LirifyService/QueuePlaylists
 ```
 
-Commit rules: non-empty lyrics. Any language is indexable. The index is
-accumulative; duplicates are skipped per track. Failed lookups go to
-`failed_songs` and are retried with bounded backoff. Terminal playlist errors are
-not retried on the server.
-
-## Local ↔ cloud parity
-
-Both stacks read the same Atlas + Qdrant; only the laptop writes. Every commit
-bumps `index_stats.revision`; cloud instances compare it every
-`INDEX_REFRESH_SECONDS` (60 s) and on inbound requests at most every
-`INDEX_CHECK_SECONDS` (10 s), so a local batch becomes visible without a
-redeploy.
-
-```bash
-python3 scripts/sync_with_cloud.py parity   # local vs cloud counts
-python3 scripts/sync_with_cloud.py reload   # force cloud re-hydrate
-```
-
-## Deployment
-
-Push to `main`. GitHub Actions verifies the contract and builds (`verify`),
-pushes three images to Artifact Registry (`images`), applies Terraform against a
-GCS remote state bucket (`deploy`), and smoke-tests the `*.run.app` URLs
-(`smoke`). The three Cloud Run services are read-only; no Cloud Run service can
-index. One-time GCP, Atlas, Qdrant, DNS and GitHub setup is in
-[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
-
-## Python API surface
-
-| Route | Cloud serving | Local indexer (`SERVE_ONLY=false`) |
-| --- | --- | --- |
-| `GET /health`, `/stats`, `/queue`, `/cache`, `/providers`, `/matrices` | read-only | read-only |
-| `POST /extract`, `/index`, `/queue`, `/retry` | `403` | indexing |
-| `GET /search`, `/recommend/{id}`, `/songs`, `/song/{id}` | yes | yes |
-| `GET/POST /api/player/*` | yes (duration persistence allowed) | yes |
-| `/api/v1/bot/*` | health only; writes `403` | bearer-protected ingestion |
-| `/ws` | status/ping only | live progress |
-| gRPC `LirifyService` | player + read RPCs; index RPCs `UNIMPLEMENTED` | full |
-| gRPC `LirifyIndexerService` | not registered | publish + local index |
-
-## Notes
-
-- `yt-dlp` is required at runtime for playlist extraction, duration extraction and
-  the player stream proxy.
-- `GET /song/{id}` and `/songs` expose only committed songs.
-- Similarity weights live only in `WEIGHTS` in `services/api/app/main.py`.
-- `SERVE_ONLY` defaults to **true** (safe): forgetting the flag on a deployment
-  yields a serving replica that cannot mutate the index.
-- `store.py` and `vector.py` refuse writes when `SERVE_ONLY=true`; `duration_put`
-  (player metadata) is the one explicitly allowed write.
-- Go UI templates are embedded with `go:embed`: rebuild `go-ui` after template
-  edits.
+The local-indexer has no HTTP surface. The dashboard is the supported UI, and
+ingestion uses `yt-dlp` plus the nine-provider lyric chain.

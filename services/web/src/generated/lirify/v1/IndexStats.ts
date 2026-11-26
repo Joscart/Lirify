@@ -33,6 +33,7 @@ export interface IndexStats {
   'localVocabularyTerms'?: (number);
   'localInvertedTerms'?: (number);
   'localIndexDir'?: (string);
+  'revision'?: (number | string | Long);
 }
 
 export interface IndexStats__Output {
@@ -65,4 +66,5 @@ export interface IndexStats__Output {
   'localVocabularyTerms': (number);
   'localInvertedTerms': (number);
   'localIndexDir': (string);
+  'revision': (string);
 }

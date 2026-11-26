@@ -57,7 +57,7 @@ type Track struct {
 	VideoId       string                 `protobuf:"bytes,1,opt,name=video_id,json=videoId,proto3" json:"video_id,omitempty"`
 	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"` // Normalised track title.
 	Artist        string                 `protobuf:"bytes,3,opt,name=artist,proto3" json:"artist,omitempty"`
-	Language      string                 `protobuf:"bytes,4,opt,name=language,proto3" json:"language,omitempty"`                             // en | es (index filter).
+	Language      string                 `protobuf:"bytes,4,opt,name=language,proto3" json:"language,omitempty"`                             // Best-effort BCP-47 label (metadata only; all languages index).
 	Backend       string                 `protobuf:"bytes,5,opt,name=backend,proto3" json:"backend,omitempty"`                               // Lyrics provider that resolved the track.
 	YoutubeTitle  string                 `protobuf:"bytes,6,opt,name=youtube_title,json=youtubeTitle,proto3" json:"youtube_title,omitempty"` // Original YouTube title.
 	Duration      float64                `protobuf:"fixed64,7,opt,name=duration,proto3" json:"duration,omitempty"`                           // Seconds, 0 when unknown.
@@ -282,6 +282,8 @@ type Job struct {
 	Source        string                 `protobuf:"bytes,9,opt,name=source,proto3" json:"source,omitempty"`                          // go-webui | bot:<name> | manual
 	CreatedAt     int64                  `protobuf:"varint,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // unix seconds
 	UpdatedAt     int64                  `protobuf:"varint,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"` // unix seconds
+	ErrorCode     string                 `protobuf:"bytes,12,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`  // stable failure code from bot_api.classify_playlist_error
+	RetryMode     string                 `protobuf:"bytes,13,opt,name=retry_mode,json=retryMode,proto3" json:"retry_mode,omitempty"`  // never | agent-jitter (who owns the retry decision)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -391,6 +393,20 @@ func (x *Job) GetUpdatedAt() int64 {
 		return x.UpdatedAt
 	}
 	return 0
+}
+
+func (x *Job) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *Job) GetRetryMode() string {
+	if x != nil {
+		return x.RetryMode
+	}
+	return ""
 }
 
 type SearchRequest struct {
@@ -565,7 +581,9 @@ type RecommendResponse struct {
 	SeedVideoId     string                 `protobuf:"bytes,1,opt,name=seed_video_id,json=seedVideoId,proto3" json:"seed_video_id,omitempty"`
 	Recommendations []*TrackSummary        `protobuf:"bytes,2,rep,name=recommendations,proto3" json:"recommendations,omitempty"`
 	// "qdrant" | "matrix" (in-process fallback)
-	Engine        string `protobuf:"bytes,3,opt,name=engine,proto3" json:"engine,omitempty"`
+	Engine string `protobuf:"bytes,3,opt,name=engine,proto3" json:"engine,omitempty"`
+	// Score breakdown the player displays: name .10 / artist .05 / lyrics .85.
+	Weights       map[string]float64 `protobuf:"bytes,4,rep,name=weights,proto3" json:"weights,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"fixed64,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -619,6 +637,13 @@ func (x *RecommendResponse) GetEngine() string {
 		return x.Engine
 	}
 	return ""
+}
+
+func (x *RecommendResponse) GetWeights() map[string]float64 {
+	if x != nil {
+		return x.Weights
+	}
+	return nil
 }
 
 type GetTrackRequest struct {
@@ -1554,6 +1579,7 @@ type IndexStats struct {
 	LocalVocabularyTerms int32  `protobuf:"varint,27,opt,name=local_vocabulary_terms,json=localVocabularyTerms,proto3" json:"local_vocabulary_terms,omitempty"`
 	LocalInvertedTerms   int32  `protobuf:"varint,28,opt,name=local_inverted_terms,json=localInvertedTerms,proto3" json:"local_inverted_terms,omitempty"`
 	LocalIndexDir        string `protobuf:"bytes,29,opt,name=local_index_dir,json=localIndexDir,proto3" json:"local_index_dir,omitempty"`
+	Revision             int64  `protobuf:"varint,30,opt,name=revision,proto3" json:"revision,omitempty"` // index_stats.revision this replica serves
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -1789,6 +1815,13 @@ func (x *IndexStats) GetLocalIndexDir() string {
 		return x.LocalIndexDir
 	}
 	return ""
+}
+
+func (x *IndexStats) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
 }
 
 type WatchIndexStatsRequest struct {
@@ -2554,6 +2587,7 @@ type PublishToCloudResponse struct {
 	Directory       string                 `protobuf:"bytes,6,opt,name=directory,proto3" json:"directory,omitempty"`
 	Message         string                 `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
 	PublishedAt     int64                  `protobuf:"varint,8,opt,name=published_at,json=publishedAt,proto3" json:"published_at,omitempty"` // unix seconds
+	Unchanged       bool                   `protobuf:"varint,9,opt,name=unchanged,proto3" json:"unchanged,omitempty"`                        // true when the payload matched the last publish
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2642,6 +2676,13 @@ func (x *PublishToCloudResponse) GetPublishedAt() int64 {
 		return x.PublishedAt
 	}
 	return 0
+}
+
+func (x *PublishToCloudResponse) GetUnchanged() bool {
+	if x != nil {
+		return x.Unchanged
+	}
+	return false
 }
 
 type GetLocalIndexRequest struct {
@@ -2882,7 +2923,7 @@ const file_lirify_proto_rawDesc = "" +
 	"\blanguage\x18\x04 \x01(\tR\blanguage\x12\x14\n" +
 	"\x05score\x18\x05 \x01(\x01R\x05score\x12\x14\n" +
 	"\x05thumb\x18\x06 \x01(\tR\x05thumb\x12\x1a\n" +
-	"\bduration\x18\a \x01(\x01R\bduration\"\x92\x02\n" +
+	"\bduration\x18\a \x01(\x01R\bduration\"\xd0\x02\n" +
 	"\x03Job\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x10\n" +
@@ -2897,7 +2938,11 @@ const file_lirify_proto_rawDesc = "" +
 	"created_at\x18\n" +
 	" \x01(\x03R\tcreatedAt\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\v \x01(\x03R\tupdatedAt\";\n" +
+	"updated_at\x18\v \x01(\x03R\tupdatedAt\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\f \x01(\tR\terrorCode\x12\x1d\n" +
+	"\n" +
+	"retry_mode\x18\r \x01(\tR\tretryMode\";\n" +
 	"\rSearchRequest\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x05R\x05limit\"Y\n" +
@@ -2907,11 +2952,15 @@ const file_lirify_proto_rawDesc = "" +
 	"\x10RecommendRequest\x12\x19\n" +
 	"\bvideo_id\x18\x01 \x01(\tR\avideoId\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x05R\x05limit\x12$\n" +
-	"\x0eseed_video_ids\x18\x03 \x03(\tR\fseedVideoIds\"\x92\x01\n" +
+	"\x0eseed_video_ids\x18\x03 \x03(\tR\fseedVideoIds\"\x93\x02\n" +
 	"\x11RecommendResponse\x12\"\n" +
 	"\rseed_video_id\x18\x01 \x01(\tR\vseedVideoId\x12A\n" +
 	"\x0frecommendations\x18\x02 \x03(\v2\x17.lirify.v1.TrackSummaryR\x0frecommendations\x12\x16\n" +
-	"\x06engine\x18\x03 \x01(\tR\x06engine\"S\n" +
+	"\x06engine\x18\x03 \x01(\tR\x06engine\x12C\n" +
+	"\aweights\x18\x04 \x03(\v2).lirify.v1.RecommendResponse.WeightsEntryR\aweights\x1a:\n" +
+	"\fWeightsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01\"S\n" +
 	"\x0fGetTrackRequest\x12\x19\n" +
 	"\bvideo_id\x18\x01 \x01(\tR\avideoId\x12%\n" +
 	"\x0einclude_lyrics\x18\x02 \x01(\bR\rincludeLyrics\":\n" +
@@ -2967,7 +3016,7 @@ const file_lirify_proto_rawDesc = "" +
 	"\tvideo_ids\x18\x02 \x03(\tR\bvideoIds\"2\n" +
 	"\x0eGetJobResponse\x12 \n" +
 	"\x03job\x18\x01 \x01(\v2\x0e.lirify.v1.JobR\x03job\"\x16\n" +
-	"\x14GetIndexStatsRequest\"\xdc\n" +
+	"\x14GetIndexStatsRequest\"\xf8\n" +
 	"\n" +
 	"\n" +
 	"IndexStats\x12#\n" +
@@ -3001,7 +3050,8 @@ const file_lirify_proto_rawDesc = "" +
 	"\rjaccard_scope\x18\x1a \x01(\tR\fjaccardScope\x124\n" +
 	"\x16local_vocabulary_terms\x18\x1b \x01(\x05R\x14localVocabularyTerms\x120\n" +
 	"\x14local_inverted_terms\x18\x1c \x01(\x05R\x12localInvertedTerms\x12&\n" +
-	"\x0flocal_index_dir\x18\x1d \x01(\tR\rlocalIndexDir\x1a<\n" +
+	"\x0flocal_index_dir\x18\x1d \x01(\tR\rlocalIndexDir\x12\x1a\n" +
+	"\brevision\x18\x1e \x01(\x03R\brevision\x1a<\n" +
 	"\x0eLanguagesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\x1a;\n" +
@@ -3066,7 +3116,7 @@ const file_lirify_proto_rawDesc = "" +
 	"\x0ejob_status_url\x18\x03 \x01(\tR\fjobStatusUrl\"]\n" +
 	"\x15PublishToCloudRequest\x12.\n" +
 	"\x13rebuild_local_index\x18\x01 \x01(\bR\x11rebuildLocalIndex\x12\x14\n" +
-	"\x05limit\x18\x02 \x01(\x05R\x05limit\"\x93\x02\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\"\xb1\x02\n" +
 	"\x16PublishToCloudResponse\x12\x1c\n" +
 	"\tpublished\x18\x01 \x01(\bR\tpublished\x12\x14\n" +
 	"\x05songs\x18\x02 \x01(\x05R\x05songs\x12\x18\n" +
@@ -3075,7 +3125,8 @@ const file_lirify_proto_rawDesc = "" +
 	"\x0einverted_terms\x18\x05 \x01(\x05R\rinvertedTerms\x12\x1c\n" +
 	"\tdirectory\x18\x06 \x01(\tR\tdirectory\x12\x18\n" +
 	"\amessage\x18\a \x01(\tR\amessage\x12!\n" +
-	"\fpublished_at\x18\b \x01(\x03R\vpublishedAt\"\x16\n" +
+	"\fpublished_at\x18\b \x01(\x03R\vpublishedAt\x12\x1c\n" +
+	"\tunchanged\x18\t \x01(\bR\tunchanged\"\x16\n" +
 	"\x14GetLocalIndexRequest\"\xed\x03\n" +
 	"\x0eLocalIndexInfo\x12\x1c\n" +
 	"\tdirectory\x18\x01 \x01(\tR\tdirectory\x12\x1c\n" +
@@ -3128,7 +3179,7 @@ func file_lirify_proto_rawDescGZIP() []byte {
 	return file_lirify_proto_rawDescData
 }
 
-var file_lirify_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_lirify_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
 var file_lirify_proto_goTypes = []any{
 	(*Track)(nil),                        // 0: lirify.v1.Track
 	(*TrackSummary)(nil),                 // 1: lirify.v1.TrackSummary
@@ -3172,73 +3223,75 @@ var file_lirify_proto_goTypes = []any{
 	(*GetLocalIndexRequest)(nil),         // 39: lirify.v1.GetLocalIndexRequest
 	(*LocalIndexInfo)(nil),               // 40: lirify.v1.LocalIndexInfo
 	(*GetLocalIndexResponse)(nil),        // 41: lirify.v1.GetLocalIndexResponse
-	nil,                                  // 42: lirify.v1.IndexStats.LanguagesEntry
-	nil,                                  // 43: lirify.v1.IndexStats.BackendsEntry
-	nil,                                  // 44: lirify.v1.IndexStats.WeightsEntry
-	nil,                                  // 45: lirify.v1.MatrixPreviewResponse.MatricesEntry
-	nil,                                  // 46: lirify.v1.MatrixPreviewResponse.WeightsEntry
+	nil,                                  // 42: lirify.v1.RecommendResponse.WeightsEntry
+	nil,                                  // 43: lirify.v1.IndexStats.LanguagesEntry
+	nil,                                  // 44: lirify.v1.IndexStats.BackendsEntry
+	nil,                                  // 45: lirify.v1.IndexStats.WeightsEntry
+	nil,                                  // 46: lirify.v1.MatrixPreviewResponse.MatricesEntry
+	nil,                                  // 47: lirify.v1.MatrixPreviewResponse.WeightsEntry
 }
 var file_lirify_proto_depIdxs = []int32{
 	1,  // 0: lirify.v1.SearchResponse.results:type_name -> lirify.v1.TrackSummary
 	1,  // 1: lirify.v1.RecommendResponse.recommendations:type_name -> lirify.v1.TrackSummary
-	0,  // 2: lirify.v1.GetTrackResponse.track:type_name -> lirify.v1.Track
-	0,  // 3: lirify.v1.ListTracksResponse.tracks:type_name -> lirify.v1.Track
-	11, // 4: lirify.v1.GetLyricsResponse.lines:type_name -> lirify.v1.LyricsLine
-	2,  // 5: lirify.v1.QueuePlaylistsResponse.jobs:type_name -> lirify.v1.Job
-	2,  // 6: lirify.v1.GetJobResponse.job:type_name -> lirify.v1.Job
-	42, // 7: lirify.v1.IndexStats.languages:type_name -> lirify.v1.IndexStats.LanguagesEntry
-	43, // 8: lirify.v1.IndexStats.backends:type_name -> lirify.v1.IndexStats.BackendsEntry
-	2,  // 9: lirify.v1.IndexStats.jobs:type_name -> lirify.v1.Job
-	44, // 10: lirify.v1.IndexStats.weights:type_name -> lirify.v1.IndexStats.WeightsEntry
-	26, // 11: lirify.v1.GetFailedSongsResponse.failed:type_name -> lirify.v1.FailedSong
-	32, // 12: lirify.v1.MatrixPreview.rows:type_name -> lirify.v1.MatrixPreviewRow
-	1,  // 13: lirify.v1.MatrixPreviewResponse.songs:type_name -> lirify.v1.TrackSummary
-	45, // 14: lirify.v1.MatrixPreviewResponse.matrices:type_name -> lirify.v1.MatrixPreviewResponse.MatricesEntry
-	46, // 15: lirify.v1.MatrixPreviewResponse.weights:type_name -> lirify.v1.MatrixPreviewResponse.WeightsEntry
-	2,  // 16: lirify.v1.IndexPlaylistFromBotResponse.job:type_name -> lirify.v1.Job
-	40, // 17: lirify.v1.GetLocalIndexResponse.info:type_name -> lirify.v1.LocalIndexInfo
-	33, // 18: lirify.v1.MatrixPreviewResponse.MatricesEntry.value:type_name -> lirify.v1.MatrixPreview
-	3,  // 19: lirify.v1.LirifyService.Search:input_type -> lirify.v1.SearchRequest
-	5,  // 20: lirify.v1.LirifyService.Recommend:input_type -> lirify.v1.RecommendRequest
-	7,  // 21: lirify.v1.LirifyService.GetTrack:input_type -> lirify.v1.GetTrackRequest
-	9,  // 22: lirify.v1.LirifyService.ListTracks:input_type -> lirify.v1.ListTracksRequest
-	12, // 23: lirify.v1.LirifyService.GetLyrics:input_type -> lirify.v1.GetLyricsRequest
-	14, // 24: lirify.v1.LirifyService.Stream:input_type -> lirify.v1.StreamRequest
-	16, // 25: lirify.v1.LirifyService.IndexPlaylist:input_type -> lirify.v1.IndexPlaylistRequest
-	17, // 26: lirify.v1.LirifyService.QueuePlaylists:input_type -> lirify.v1.QueuePlaylistsRequest
-	19, // 27: lirify.v1.LirifyService.GetJob:input_type -> lirify.v1.GetJobRequest
-	20, // 28: lirify.v1.LirifyService.ExtractVideoIds:input_type -> lirify.v1.ExtractVideoIdsRequest
-	23, // 29: lirify.v1.LirifyService.GetIndexStats:input_type -> lirify.v1.GetIndexStatsRequest
-	25, // 30: lirify.v1.LirifyService.WatchIndexStats:input_type -> lirify.v1.WatchIndexStatsRequest
-	27, // 31: lirify.v1.LirifyService.GetFailedSongs:input_type -> lirify.v1.GetFailedSongsRequest
-	29, // 32: lirify.v1.LirifyService.RetryFailed:input_type -> lirify.v1.RetryFailedRequest
-	31, // 33: lirify.v1.LirifyService.MatrixPreview:input_type -> lirify.v1.MatrixPreviewRequest
-	35, // 34: lirify.v1.LirifyService.IndexPlaylistFromBot:input_type -> lirify.v1.IndexPlaylistFromBotRequest
-	37, // 35: lirify.v1.LirifyIndexerService.PublishToCloud:input_type -> lirify.v1.PublishToCloudRequest
-	39, // 36: lirify.v1.LirifyIndexerService.GetLocalIndex:input_type -> lirify.v1.GetLocalIndexRequest
-	4,  // 37: lirify.v1.LirifyService.Search:output_type -> lirify.v1.SearchResponse
-	6,  // 38: lirify.v1.LirifyService.Recommend:output_type -> lirify.v1.RecommendResponse
-	8,  // 39: lirify.v1.LirifyService.GetTrack:output_type -> lirify.v1.GetTrackResponse
-	10, // 40: lirify.v1.LirifyService.ListTracks:output_type -> lirify.v1.ListTracksResponse
-	13, // 41: lirify.v1.LirifyService.GetLyrics:output_type -> lirify.v1.GetLyricsResponse
-	15, // 42: lirify.v1.LirifyService.Stream:output_type -> lirify.v1.StreamResponse
-	2,  // 43: lirify.v1.LirifyService.IndexPlaylist:output_type -> lirify.v1.Job
-	18, // 44: lirify.v1.LirifyService.QueuePlaylists:output_type -> lirify.v1.QueuePlaylistsResponse
-	22, // 45: lirify.v1.LirifyService.GetJob:output_type -> lirify.v1.GetJobResponse
-	21, // 46: lirify.v1.LirifyService.ExtractVideoIds:output_type -> lirify.v1.ExtractVideoIdsResponse
-	24, // 47: lirify.v1.LirifyService.GetIndexStats:output_type -> lirify.v1.IndexStats
-	24, // 48: lirify.v1.LirifyService.WatchIndexStats:output_type -> lirify.v1.IndexStats
-	28, // 49: lirify.v1.LirifyService.GetFailedSongs:output_type -> lirify.v1.GetFailedSongsResponse
-	30, // 50: lirify.v1.LirifyService.RetryFailed:output_type -> lirify.v1.RetryFailedResponse
-	34, // 51: lirify.v1.LirifyService.MatrixPreview:output_type -> lirify.v1.MatrixPreviewResponse
-	36, // 52: lirify.v1.LirifyService.IndexPlaylistFromBot:output_type -> lirify.v1.IndexPlaylistFromBotResponse
-	38, // 53: lirify.v1.LirifyIndexerService.PublishToCloud:output_type -> lirify.v1.PublishToCloudResponse
-	41, // 54: lirify.v1.LirifyIndexerService.GetLocalIndex:output_type -> lirify.v1.GetLocalIndexResponse
-	37, // [37:55] is the sub-list for method output_type
-	19, // [19:37] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	42, // 2: lirify.v1.RecommendResponse.weights:type_name -> lirify.v1.RecommendResponse.WeightsEntry
+	0,  // 3: lirify.v1.GetTrackResponse.track:type_name -> lirify.v1.Track
+	0,  // 4: lirify.v1.ListTracksResponse.tracks:type_name -> lirify.v1.Track
+	11, // 5: lirify.v1.GetLyricsResponse.lines:type_name -> lirify.v1.LyricsLine
+	2,  // 6: lirify.v1.QueuePlaylistsResponse.jobs:type_name -> lirify.v1.Job
+	2,  // 7: lirify.v1.GetJobResponse.job:type_name -> lirify.v1.Job
+	43, // 8: lirify.v1.IndexStats.languages:type_name -> lirify.v1.IndexStats.LanguagesEntry
+	44, // 9: lirify.v1.IndexStats.backends:type_name -> lirify.v1.IndexStats.BackendsEntry
+	2,  // 10: lirify.v1.IndexStats.jobs:type_name -> lirify.v1.Job
+	45, // 11: lirify.v1.IndexStats.weights:type_name -> lirify.v1.IndexStats.WeightsEntry
+	26, // 12: lirify.v1.GetFailedSongsResponse.failed:type_name -> lirify.v1.FailedSong
+	32, // 13: lirify.v1.MatrixPreview.rows:type_name -> lirify.v1.MatrixPreviewRow
+	1,  // 14: lirify.v1.MatrixPreviewResponse.songs:type_name -> lirify.v1.TrackSummary
+	46, // 15: lirify.v1.MatrixPreviewResponse.matrices:type_name -> lirify.v1.MatrixPreviewResponse.MatricesEntry
+	47, // 16: lirify.v1.MatrixPreviewResponse.weights:type_name -> lirify.v1.MatrixPreviewResponse.WeightsEntry
+	2,  // 17: lirify.v1.IndexPlaylistFromBotResponse.job:type_name -> lirify.v1.Job
+	40, // 18: lirify.v1.GetLocalIndexResponse.info:type_name -> lirify.v1.LocalIndexInfo
+	33, // 19: lirify.v1.MatrixPreviewResponse.MatricesEntry.value:type_name -> lirify.v1.MatrixPreview
+	3,  // 20: lirify.v1.LirifyService.Search:input_type -> lirify.v1.SearchRequest
+	5,  // 21: lirify.v1.LirifyService.Recommend:input_type -> lirify.v1.RecommendRequest
+	7,  // 22: lirify.v1.LirifyService.GetTrack:input_type -> lirify.v1.GetTrackRequest
+	9,  // 23: lirify.v1.LirifyService.ListTracks:input_type -> lirify.v1.ListTracksRequest
+	12, // 24: lirify.v1.LirifyService.GetLyrics:input_type -> lirify.v1.GetLyricsRequest
+	14, // 25: lirify.v1.LirifyService.Stream:input_type -> lirify.v1.StreamRequest
+	16, // 26: lirify.v1.LirifyService.IndexPlaylist:input_type -> lirify.v1.IndexPlaylistRequest
+	17, // 27: lirify.v1.LirifyService.QueuePlaylists:input_type -> lirify.v1.QueuePlaylistsRequest
+	19, // 28: lirify.v1.LirifyService.GetJob:input_type -> lirify.v1.GetJobRequest
+	20, // 29: lirify.v1.LirifyService.ExtractVideoIds:input_type -> lirify.v1.ExtractVideoIdsRequest
+	23, // 30: lirify.v1.LirifyService.GetIndexStats:input_type -> lirify.v1.GetIndexStatsRequest
+	25, // 31: lirify.v1.LirifyService.WatchIndexStats:input_type -> lirify.v1.WatchIndexStatsRequest
+	27, // 32: lirify.v1.LirifyService.GetFailedSongs:input_type -> lirify.v1.GetFailedSongsRequest
+	29, // 33: lirify.v1.LirifyService.RetryFailed:input_type -> lirify.v1.RetryFailedRequest
+	31, // 34: lirify.v1.LirifyService.MatrixPreview:input_type -> lirify.v1.MatrixPreviewRequest
+	35, // 35: lirify.v1.LirifyService.IndexPlaylistFromBot:input_type -> lirify.v1.IndexPlaylistFromBotRequest
+	37, // 36: lirify.v1.LirifyIndexerService.PublishToCloud:input_type -> lirify.v1.PublishToCloudRequest
+	39, // 37: lirify.v1.LirifyIndexerService.GetLocalIndex:input_type -> lirify.v1.GetLocalIndexRequest
+	4,  // 38: lirify.v1.LirifyService.Search:output_type -> lirify.v1.SearchResponse
+	6,  // 39: lirify.v1.LirifyService.Recommend:output_type -> lirify.v1.RecommendResponse
+	8,  // 40: lirify.v1.LirifyService.GetTrack:output_type -> lirify.v1.GetTrackResponse
+	10, // 41: lirify.v1.LirifyService.ListTracks:output_type -> lirify.v1.ListTracksResponse
+	13, // 42: lirify.v1.LirifyService.GetLyrics:output_type -> lirify.v1.GetLyricsResponse
+	15, // 43: lirify.v1.LirifyService.Stream:output_type -> lirify.v1.StreamResponse
+	2,  // 44: lirify.v1.LirifyService.IndexPlaylist:output_type -> lirify.v1.Job
+	18, // 45: lirify.v1.LirifyService.QueuePlaylists:output_type -> lirify.v1.QueuePlaylistsResponse
+	22, // 46: lirify.v1.LirifyService.GetJob:output_type -> lirify.v1.GetJobResponse
+	21, // 47: lirify.v1.LirifyService.ExtractVideoIds:output_type -> lirify.v1.ExtractVideoIdsResponse
+	24, // 48: lirify.v1.LirifyService.GetIndexStats:output_type -> lirify.v1.IndexStats
+	24, // 49: lirify.v1.LirifyService.WatchIndexStats:output_type -> lirify.v1.IndexStats
+	28, // 50: lirify.v1.LirifyService.GetFailedSongs:output_type -> lirify.v1.GetFailedSongsResponse
+	30, // 51: lirify.v1.LirifyService.RetryFailed:output_type -> lirify.v1.RetryFailedResponse
+	34, // 52: lirify.v1.LirifyService.MatrixPreview:output_type -> lirify.v1.MatrixPreviewResponse
+	36, // 53: lirify.v1.LirifyService.IndexPlaylistFromBot:output_type -> lirify.v1.IndexPlaylistFromBotResponse
+	38, // 54: lirify.v1.LirifyIndexerService.PublishToCloud:output_type -> lirify.v1.PublishToCloudResponse
+	41, // 55: lirify.v1.LirifyIndexerService.GetLocalIndex:output_type -> lirify.v1.GetLocalIndexResponse
+	38, // [38:56] is the sub-list for method output_type
+	20, // [20:38] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_lirify_proto_init() }
@@ -3252,7 +3305,7 @@ func file_lirify_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lirify_proto_rawDesc), len(file_lirify_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   47,
+			NumMessages:   48,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

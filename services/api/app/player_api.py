@@ -756,11 +756,19 @@ def build_router(
         }
 
     @router.get("/radio/{video_id}")
-    def radio(video_id: str, limit: int = 16):
+    def radio(video_id: str, limit: int = 16, seeds: str = ""):
         seed_song = song_by_id(video_id)
         if not seed_song:
             raise HTTPException(404, "Unknown video id")
-        core = recommend_fn(video_id, max(1, min(limit, 50)))
+        # Match the gRPC/Astro contract: seed_video_ids are browser-owned and
+        # ordered newest-first. Recommend expects the anchor first.
+        seed_ids = [video_id] + [value.strip() for value in seeds.split(",") if value.strip()]
+        seed_ids = list(dict.fromkeys(seed_ids))[:5]
+        core = recommend_fn(
+            video_id,
+            max(1, min(limit, 50)),
+            ",".join(seed_ids[1:]),
+        )
         items = []
         for result in core.get("recommendations") or []:
             song = song_by_id(result.get("video_id", ""))
@@ -769,9 +777,11 @@ def build_router(
                 round(min(1.0, max(0.0, float(result.get("score") or 0))) * 100)
             )
             items.append(item)
+        from main import WEIGHTS  # local import: main imports this module
+
         return {
             "seed": track_brief(seed_song),
-            "score_weights": (state().get("build") or {}).get("weights") or {},
+            "score_weights": (state().get("build") or {}).get("weights") or WEIGHTS,
             "recommendations": items,
         }
 

@@ -11,6 +11,7 @@ export interface PublishToCloudResponse {
   'directory'?: (string);
   'message'?: (string);
   'publishedAt'?: (number | string | Long);
+  'unchanged'?: (boolean);
 }
 
 export interface PublishToCloudResponse__Output {
@@ -22,4 +23,5 @@ export interface PublishToCloudResponse__Output {
   'directory': (string);
   'message': (string);
   'publishedAt': (string);
+  'unchanged': (boolean);
 }
