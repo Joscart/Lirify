@@ -31,6 +31,9 @@ type templateExecutor interface {
 
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /", s.index)
+	mux.HandleFunc("GET /assets/indexer.css", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, tmplFS, "templates/indexer.css")
+	})
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /readyz", s.ready)
 	// Kept for container-local probes only: the *.run.app edge intercepts
@@ -60,7 +63,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := s.tmpl.ExecuteTemplate(w, "index.html", nil); err != nil {
+	if err := s.tmpl.ExecuteTemplate(w, "index.html", dashboardLocale(w, r)); err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
 	}
 }

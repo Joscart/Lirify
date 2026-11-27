@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { courseLanding, courseResults } from "./course-view";
 import { emit } from "./bus";
 import {
   escapeHtml,
@@ -6,16 +7,15 @@ import {
   fmtDuration,
   fmtTime,
   greeting,
-  highlight,
 } from "./format";
 import { iconMarkup } from "./icons";
-import { hasOnboarded, recordSearch, seeds } from "./history";
+import { recordSearch, seeds } from "./history";
+import { text } from "./locale";
 import { player } from "./player";
 import type {
   Artist,
   Bootstrap,
   Playlist,
-  SearchPayload,
   Shelf,
   Track,
   ViewName,
@@ -156,7 +156,7 @@ export function trackCard(track: Track, sourceKey: string, options: RenderOption
     tag.textContent = options.tag;
   } else if (tag && track.synced_lyrics && !options.video) {
     tag.hidden = false;
-    tag.textContent = "synced";
+    tag.textContent = text("sincronizada", "synced");
   }
   if (player.current?.id === track.id) card.classList.add("is-playing");
   return card;
@@ -227,9 +227,7 @@ export function trackRow(
   row.dataset.trackId = track.id;
   row.dataset.source = sourceKey;
   row.dataset.index = String(index);
-  row.dataset.action = "play";
-  row.tabIndex = 0;
-  row.setAttribute("role", "button");
+  row.querySelector(".track-index")?.setAttribute("aria-label", `${text("Reproducir", "Play")} ${track.title}`);
   if (player.state.current?.id === track.id) row.classList.add("is-playing");
   if (!player.state.playing) row.classList.add("is-paused");
 
@@ -253,7 +251,7 @@ export function trackRow(
   }
   const src = row.querySelector<HTMLElement>('[data-el="src"]');
   if (src) {
-    src.textContent = track.synced_lyrics ? "synced lyrics" : "unsynced";
+    src.textContent = track.synced_lyrics ? text("Letra sincronizada", "Synced lyrics") : text("Letra", "Lyrics");
   }
   const lang = row.querySelector<HTMLElement>('[data-el="lang"]');
   if (lang) lang.textContent = track.language || "—";
@@ -263,42 +261,6 @@ export function trackRow(
   if (like && player.isLiked(track.id)) {
     like.classList.add("is-liked");
     like.setAttribute("aria-pressed", "true");
-  }
-  return row;
-}
-
-function resultRow(track: Track, index: number, sourceKey: string, query: string): HTMLElement {
-  const row = cloneTemplate("tpl-result-row");
-  row.dataset.trackId = track.id;
-  row.dataset.source = sourceKey;
-  row.dataset.action = "play";
-  row.tabIndex = 0;
-  row.setAttribute("role", "button");
-  const idx = row.querySelector<HTMLElement>('[data-el="index"]');
-  if (idx) idx.textContent = String(index + 1).padStart(2, "0");
-  const art = row.querySelector<HTMLImageElement>('[data-el="art"]');
-  setArt(art, null, track.thumb, track.title);
-  const title = row.querySelector<HTMLElement>('[data-el="title"]');
-  if (title) title.innerHTML = highlight(track.title, query);
-  const artist = row.querySelector<HTMLElement>('[data-el="artist"]');
-  if (artist) {
-    artist.textContent = track.artist;
-    artist.dataset.artistId = track.artist_id;
-    (artist as HTMLAnchorElement).href = artistHref(track.artist_id);
-  }
-  const lang = row.querySelector<HTMLElement>('[data-el="lang"]');
-  if (lang) lang.textContent = track.language_name || track.language;
-  const src = row.querySelector<HTMLElement>('[data-el="src"]');
-  if (src) src.textContent = track.synced_lyrics ? "synced" : "unsynced";
-  const snippet = row.querySelector<HTMLElement>('[data-el="snippet"]');
-  if (snippet && track.snippet) {
-    snippet.hidden = false;
-    snippet.innerHTML = `“${highlight(track.snippet, query)}”`;
-  }
-  const match = row.querySelector<HTMLElement>('[data-el="match"]');
-  if (match && typeof track.match === "number" && track.match > 0) {
-    match.hidden = false;
-    match.textContent = `${track.match}% match`;
   }
   return row;
 }
@@ -314,9 +276,9 @@ function trackTable(tracks: Track[], sourceKey: string, queueTracks: Track[] = t
   wrap.innerHTML = `
     <div class="track-head">
       <span>#</span>
-      <span>Title</span>
-      <span class="col-lang">Language</span>
-      <span class="col-duration" style="text-align:right">Time</span>
+      <span>${text("Título", "Title")}</span>
+      <span class="col-lang">${text("Idioma", "Language")}</span>
+      <span class="col-duration" style="text-align:right">${text("Duración", "Time")}</span>
       <span class="col-actions"></span>
     </div>`;
   const fragment = document.createDocumentFragment();
@@ -335,8 +297,8 @@ function sectionHead(title: string, subtitle: string, seeAll?: { label: string; 
     </div>
     <div class="shelf-tools">
       ${seeAll ? `<a class="shelf-link" href="${seeAll.href}">${escapeHtml(seeAll.label)}</a>` : ""}
-      <button class="shelf-arrow" data-scroll="prev" aria-label="Scroll left">${iconMarkup("chevron-left", "", 15)}</button>
-      <button class="shelf-arrow" data-scroll="next" aria-label="Scroll right">${iconMarkup("chevron-right", "", 15)}</button>
+      <button class="shelf-arrow" data-scroll="prev" aria-label="${text("Desplazar a la izquierda", "Scroll left")}">${iconMarkup("chevron-left", "", 15)}</button>
+      <button class="shelf-arrow" data-scroll="next" aria-label="${text("Desplazar a la derecha", "Scroll right")}">${iconMarkup("chevron-right", "", 15)}</button>
     </div>`;
   return head;
 }
@@ -412,7 +374,7 @@ function errorState(message: string): HTMLElement {
     <span class="glyph">${iconMarkup("wave", "", 24)}</span>
     <h3>The API did not answer</h3>
     <p>${escapeHtml(message)}</p>
-    <button class="btn btn-ghost btn-sm" data-retry>Try again</button>`;
+    <button class="btn btn-ghost btn-sm" data-retry>${text("Reintentar", "Try again")}</button>`;
   el.querySelector("[data-retry]")?.addEventListener("click", () => renderRoute(currentRoute()));
   return el;
 }
@@ -433,50 +395,8 @@ function skeletonView(target: HTMLElement) {
 // Home
 // ---------------------------------------------------------------------------
 
-function onboardingGate(root: HTMLElement): void {
-  const wrap = document.createElement("div");
-  wrap.className = "onboarding";
-  wrap.innerHTML = `
-    <section class="hero onboarding-hero">
-      <div class="hero-body">
-        <div class="hero-kicker"><span class="dot"></span> First run on this browser</div>
-        <h1 class="hero-title">Start with one search.</h1>
-        <p class="hero-blurb">
-          <span>Lirify has no account and no server-side profile. Your listening history lives only in
-          this browser, so recommendations unlock after your first search.</span>
-        </p>
-        <form class="onboarding-form" data-onboarding-form>
-          <label class="sr-only" for="onboarding-search">Search the lyrics index</label>
-          <input id="onboarding-search" name="q" type="search" autocomplete="off" spellcheck="false"
-            placeholder="Search a song, artist or lyric line" />
-          <button class="btn btn-primary" type="submit">${iconMarkup("search", "", 16)} Search</button>
-        </form>
-        <div class="chips" data-onboarding-suggestions>
-          ${["love", "corazon", "midnight", "sunshine", "fuego"]
-            .map((term) => `<button class="chip" type="button" data-suggest="${escapeHtml(term)}">${escapeHtml(term)}</button>`)
-            .join("")}
-        </div>
-        <p class="muted onboarding-note">Nothing is stored on the server — clearing site data resets this.</p>
-      </div>
-    </section>`;
-  const form = wrap.querySelector<HTMLFormElement>("[data-onboarding-form]");
-  form?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const input = form.querySelector<HTMLInputElement>("input[name=q]");
-    const value = (input?.value || "").trim();
-    if (!value) {
-      input?.focus();
-      return;
-    }
-    navigate(`/search/${encodeURIComponent(value)}`);
-  });
-  wrap.querySelectorAll<HTMLButtonElement>("[data-suggest]").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      navigate(`/search/${encodeURIComponent(chip.dataset.suggest || "")}`);
-    });
-  });
-  root.replaceChildren(wrap);
-  requestAnimationFrame(() => wrap.querySelector<HTMLInputElement>("input[name=q]")?.focus());
+function showCourseLanding(root: HTMLElement): void {
+  root.replaceChildren(courseLanding((query) => navigate(`/search/${encodeURIComponent(query)}`)));
 }
 
 /** A "because you listened" shelf built purely from browser-owned seeds. */
@@ -499,10 +419,6 @@ async function historyShelf(token: number): Promise<HTMLElement | null> {
 }
 
 async function renderHome(root: HTMLElement, token: number): Promise<void> {
-  if (!hasOnboarded()) {
-    if (token === renderToken) onboardingGate(root);
-    return;
-  }
   skeletonView(root);
   let data: Bootstrap;
   try {
@@ -524,12 +440,12 @@ async function renderHome(root: HTMLElement, token: number): Promise<void> {
       )} lyric tokens, ready to play.</p>
     </div>
     <div class="page-actions">
-      <button class="icon-btn round" data-refresh aria-label="Refresh the index" data-tip="Refresh index">${iconMarkup(
+      <button class="icon-btn round" data-refresh aria-label="${text("Actualizar catálogo", "Refresh the index")}" data-tip="${text("Actualizar catálogo", "Refresh index")}">${iconMarkup(
         "refresh",
         "",
         16,
       )}</button>
-      <button class="btn btn-ghost btn-sm" data-home-shuffle>${iconMarkup("shuffle", "", 15)} Shuffle library</button>
+      <button class="btn btn-ghost btn-sm" data-home-shuffle>${iconMarkup("shuffle", "", 15)} ${text("Mezclar biblioteca", "Shuffle library")}</button>
     </div>`;
   pageHead.querySelector("[data-refresh]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
@@ -561,7 +477,7 @@ async function renderHome(root: HTMLElement, token: number): Promise<void> {
         <div class="art-fallback">${iconMarkup("music", "", 60)}</div>
       </div>
       <div class="hero-body">
-        <div class="hero-kicker"><span class="dot"></span> Featured from your index</div>
+
         <h1 class="hero-title">${escapeHtml(data.hero.title)}</h1>
         <a class="hero-artist" href="${artistHref(data.hero.artist_id)}">${escapeHtml(data.hero.artist)}</a>
         <div class="hero-blurb">
@@ -572,12 +488,12 @@ async function renderHome(root: HTMLElement, token: number): Promise<void> {
           <span>${escapeHtml(data.hero.blurb || "")}</span>
         </div>
         <div class="hero-actions">
-          <button class="btn btn-primary" data-hero-play>${iconMarkup("play", "", 17)} Play</button>
-          <button class="btn btn-outline" data-hero-radio>${iconMarkup("radio", "", 16)} Start radio</button>
+          <button class="btn btn-primary" data-hero-play>${iconMarkup("play", "", 17)} ${text("Reproducir", "Play")}</button>
+          <button class="btn btn-outline" data-hero-radio>${iconMarkup("radio", "", 16)} ${text("Iniciar radio", "Start radio")}</button>
         </div>
         <div class="hero-stats">
-          <div class="hero-stat"><b>${fmtCount(data.library.songs)}</b><span>Songs</span></div>
-          <div class="hero-stat"><b>${fmtCount(data.library.artists)}</b><span>Artists</span></div>
+          <div class="hero-stat"><b>${fmtCount(data.library.songs)}</b><span>${text("Canciones", "Songs")}</span></div>
+          <div class="hero-stat"><b>${fmtCount(data.library.artists)}</b><span>${text("Artistas", "Artists")}</span></div>
           <div class="hero-stat"><b>${fmtCount(data.library.terms)}</b><span>Terms</span></div>
           <div class="hero-stat"><b>${fmtCount(data.library.synced)}</b><span>Synced</span></div>
         </div>
@@ -616,7 +532,7 @@ async function renderHome(root: HTMLElement, token: number): Promise<void> {
     const all = document.createElement("a");
     all.className = "chip is-active";
     all.href = "#/library";
-    all.textContent = "All";
+    all.textContent = text("Todo", "All");
     chips.appendChild(all);
     data.languages
       .filter((language) => language.code !== "unknown")
@@ -649,7 +565,7 @@ async function renderHome(root: HTMLElement, token: number): Promise<void> {
     head.className = "shelf-head";
     head.innerHTML = `
       <div>
-        <div class="shelf-title"><h2>Everything in the index</h2></div>
+        <div class="shelf-title"><h2>${text("Todas las canciones", "Everything in the index")}</h2></div>
         <div class="shelf-sub">${fmtCount(data.library.songs)} tracks · sorted by how central they are to the lyric graph</div>
       </div>
       <div class="shelf-tools"><a class="shelf-link" href="#/library">Open library ${iconMarkup("chevron-right", "", 13)}</a></div>`;
@@ -678,181 +594,171 @@ async function renderHome(root: HTMLElement, token: number): Promise<void> {
 // Search
 // ---------------------------------------------------------------------------
 
-function searchLanding(data: Bootstrap): HTMLElement {
-  const wrap = document.createElement("div");
-  wrap.className = "search-page";
-  wrap.innerHTML = `
-    <div class="page-head">
-      <div><h1 class="search-query">What do you want to hear?</h1>
-      <p>Search titles, artists or any line of indexed lyrics.</p></div>
-    </div>`;
-  const chips = document.createElement("div");
-  chips.className = "chips";
-  ["love", "night", "one step closer", "baby", "dream", "stay"].forEach((term) => {
-    const chip = document.createElement("button");
-    chip.className = "chip";
-    chip.textContent = term;
-    chip.addEventListener("click", () => navigate(`/search/${encodeURIComponent(term)}`));
-    chips.appendChild(chip);
-  });
-  wrap.appendChild(chips);
-
-  if (data.artists.length) {
-    const section = document.createElement("section");
-    section.className = "shelf";
-    section.appendChild(sectionHead("Artists in your library", "Start with a voice", { label: "See all", href: "#/library/artists" }));
-    section.appendChild(shelfRow(data.artists.slice(0, 10).map((artist) => artistCard(artist))));
-    wireShelfArrows(section);
-    wrap.appendChild(section);
-  }
-  return wrap;
-}
-
 async function renderSearch(root: HTMLElement, token: number, query: string): Promise<void> {
-  let data: Bootstrap | null = bootstrap;
-  if (!data) {
-    try {
-      data = await getBootstrap();
-    } catch {
-      data = null;
-    }
-  }
   if (!query.trim()) {
-    if (token === renderToken) root.replaceChildren(data ? searchLanding(data) : emptyState("Search", "Type to search your index.", "search"));
+    showCourseLanding(root);
+    const content = root.querySelector<HTMLElement>("#course-catalogue-content")!;
+    try {
+      const data = await getBootstrap(true);
+      if (token !== renderToken) return;
+      content.removeAttribute("role");
+      if (data.top_tracks.length) {
+        content.replaceChildren(trackTable(data.top_tracks.slice(0, 8), "course:catalogue", data.top_tracks));
+      } else content.textContent = text("Todavía no hay canciones. Agrega una playlist para empezar.", "There are no songs yet. Add a playlist to get started.");
+    } catch {
+      if (token === renderToken) content.textContent = text("No se pudo cargar el catálogo. Recarga la página.", "Could not load the catalogue. Reload the page.");
+    }
     return;
   }
-  skeletonView(root);
-  let payload: SearchPayload;
+
+  const status = document.createElement("p");
+  status.className = "course-status";
+  status.setAttribute("role", "status");
+  status.textContent = text("Buscando en las letras…", "Searching lyrics…");
+  root.replaceChildren(status);
+
   try {
-    payload = await api.search(query, 30);
-  } catch (error) {
-    if (token === renderToken) root.replaceChildren(errorState(String((error as Error).message || error)));
-    return;
-  }
-  if (token !== renderToken) return;
-
-  // The onboarding gate opens as soon as the browser has one real search.
-  recordSearch(query);
-
-  const sourceKey = registerSource(`search:${query}`, payload.tracks);
-  const wrap = document.createElement("div");
-  wrap.className = "search-page";
-  wrap.innerHTML = `
-    <div class="page-head">
-      <div>
-        <div class="eyebrow">Search results</div>
-        <h1 class="search-query">“${escapeHtml(query)}”</h1>
-        <p>${payload.tracks.length} matches across ${fmtCount(payload.scanned)} indexed songs and their lyrics.</p>
-      </div>
-    </div>`;
-
-  if (!payload.tracks.length && !payload.artists.length) {
-    wrap.appendChild(
-      emptyState(
-        "No matches",
-        "No indexed title, artist or lyric line contains that. Try a shorter phrase, or search for a language in the library.",
-        "search",
-      ),
+    const payload = await api.courseSearch(query);
+    if (token !== renderToken) return;
+    recordSearch(query);
+    const focusHeading = document.activeElement === document.body;
+    const results = courseResults(payload, (track, index, queue, key) =>
+      trackRow(track, index, registerSource(key, queue)),
     );
-    root.replaceChildren(wrap);
-    return;
-  }
-
-  const layout = document.createElement("div");
-  layout.className = "search-layout";
-
-  const left = document.createElement("div");
-  left.className = "search-column";
-  left.innerHTML = `<h2>Top result</h2>`;
-  if (payload.top) {
-    const top = payload.top as Track;
-    const card = document.createElement("div");
-    card.className = "top-result";
-    card.dataset.trackId = top.id;
-    card.dataset.source = sourceKey;
-    const isArtist = (payload.top as Artist).kind === "artist";
-    card.innerHTML = `
-      <div class="art${isArtist ? " is-round" : ""}">
-        <img data-el="art" alt="" />
-      </div>
-      <div class="title">${escapeHtml(isArtist ? (payload.top as Artist).name : top.title)}</div>
-      <div class="meta">${
-        isArtist
-          ? `Artist · ${(payload.top as Artist).count} tracks`
-          : `${escapeHtml(top.artist)} · ${escapeHtml(top.language_name || "")}`
-      }</div>
-      <button class="play-fab" aria-label="Play">${iconMarkup("play", "", 20)}</button>`;
-    setArt(
-      card.querySelector("img"),
-      null,
-      isArtist ? (payload.top as Artist).cover : top.thumb,
-      "artwork",
-    );
-    card.querySelector(".play-fab")?.addEventListener("click", () => {
-      if (isArtist) {
-        navigate(`/artist/${(payload.top as Artist).id}`);
-      } else {
-        player.playTrack(top, payload.tracks.length ? payload.tracks : [top]);
+    root.replaceChildren(results);
+    if (focusHeading) {
+      const heading = results.querySelector("h1");
+      if (heading) {
+        heading.tabIndex = -1;
+        heading.focus({ preventScroll: true });
       }
-    });
-    card.addEventListener("click", (event) => {
-      if ((event.target as HTMLElement).closest(".play-fab")) return;
-      if (isArtist) navigate(`/artist/${(payload.top as Artist).id}`);
-      else player.playTrack(top, payload.tracks.length ? payload.tracks : [top]);
-    });
-    left.appendChild(card);
+    }
+  } catch {
+    if (token !== renderToken) return;
+    status.setAttribute("role", "alert");
+    status.textContent = text("El buscador no respondió. Intenta de nuevo en unos segundos.", "Search is unavailable. Try again in a few seconds.");
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "course-retry";
+    retry.textContent = text("Reintentar", "Try again");
+    retry.addEventListener("click", () => void renderSearch(root, token, query), { once: true });
+    status.append(" ", retry);
   }
-
-  if (payload.artists.length) {
-    const artists = document.createElement("div");
-    artists.innerHTML = `<h2 style="margin-top:22px">Artists</h2>`;
-    const grid = document.createElement("div");
-    grid.className = "search-artists";
-    payload.artists.slice(0, 6).forEach((artist) => grid.appendChild(artistCard(artist)));
-    artists.appendChild(grid);
-    left.appendChild(artists);
-  }
-  layout.appendChild(left);
-
-  const right = document.createElement("div");
-  right.innerHTML = `<div class="results-heading">Songs & lyric matches</div>`;
-  const list = document.createElement("div");
-  list.className = "result-list";
-  payload.tracks.forEach((track, index) => list.appendChild(resultRow(track, index, sourceKey, query)));
-  right.appendChild(list);
-  if (!payload.tracks.length) {
-    right.appendChild(emptyState("No songs", "Artists matched, but no track did.", "music"));
-  }
-  layout.appendChild(right);
-  wrap.appendChild(layout);
-  root.replaceChildren(wrap);
 }
 
 // ---------------------------------------------------------------------------
 // Library
 // ---------------------------------------------------------------------------
 
+function renderImport(root: HTMLElement, token: number): void {
+  const section = document.createElement("section");
+  section.className = "import-view";
+  section.innerHTML = `<div class="page-head"><div>
+    <h1>${text("Agregar canciones", "Add songs")}</h1>
+    <p>${text("Importa una lista pública o no listada de YouTube o YouTube Music.", "Import a public or unlisted playlist from YouTube or YouTube Music.")}</p>
+    </div></div>
+    <form class="import-form">
+      <label for="playlist-url">${text("Enlace de la playlist", "Playlist link")}</label>
+      <div class="course-form"><input id="playlist-url" type="url" required placeholder="https://music.youtube.com/playlist?list=…" />
+      <button class="btn btn-primary" type="submit">${iconMarkup("plus", "", 18)} ${text("Importar", "Import")}</button></div>
+      <p class="muted">${text("Las letras se recuperan e indexan antes de que las canciones aparezcan en la biblioteca. Las listas privadas de Me gusta no se pueden importar directamente.", "Lyrics are retrieved and indexed before tracks appear in your library. Private Liked Songs playlists cannot be imported directly.")}</p>
+    </form>
+    <section class="import-progress" hidden><h2>${text("Importación", "Import progress")}</h2><p role="status" id="import-status"></p>
+      <button class="btn btn-outline" type="button" id="import-check" hidden>${text("Revisar estado", "Check status")}</button>
+    </section>
+    <a class="btn btn-outline" href="#/library">${text("Ver biblioteca", "View library")}</a>`;
+  root.replaceChildren(section);
+  const form = section.querySelector<HTMLFormElement>("form")!;
+  const input = form.querySelector<HTMLInputElement>("input")!;
+  const submit = form.querySelector<HTMLButtonElement>("button")!;
+  const progress = section.querySelector<HTMLElement>(".import-progress")!;
+  const status = section.querySelector<HTMLElement>("#import-status")!;
+  const check = section.querySelector<HTMLButtonElement>("#import-check")!;
+  let jobId = sessionStorage.getItem("upspotify-import-job") || "";
+  const stages: Record<string, string> = {
+    queued: text("En cola, esperando su turno.", "Queued, waiting to start."),
+    indexing: text("Recuperando letras e indexando canciones.", "Retrieving lyrics and indexing tracks."),
+    matrix_pending: text("Calculando el índice y las matrices.", "Building the index and matrices."),
+    retry_wait: text("Esperando antes de reintentar.", "Waiting before retrying."),
+  };
+  function show(message: string): void {
+    progress.hidden = false;
+    status.textContent = message;
+  }
+  async function poll(): Promise<void> {
+    if (token !== renderToken || !jobId) return;
+    check.hidden = true;
+    submit.disabled = true;
+    try {
+      const job = await api.importStatus(jobId);
+      if (token !== renderToken) return;
+      if (job.status === "committed") {
+        show(text(`Importación terminada. ${job.added ?? 0} canciones añadidas al catálogo.`, `Import complete. ${job.added ?? 0} songs added to the catalogue.`));
+        sessionStorage.removeItem("upspotify-import-job");
+        jobId = "";
+        submit.disabled = false;
+        void getBootstrap(true).catch(() => {});
+      } else if (job.status === "error" || job.status === "skipped") {
+        show(text("No se pudo completar la importación. Comprueba que la lista sea accesible y vuelve a intentarlo.", "Import could not finish. Check that the playlist is accessible and try again.") + (job.error ? ` (${job.error})` : ""));
+        sessionStorage.removeItem("upspotify-import-job");
+        jobId = "";
+        submit.disabled = false;
+      } else {
+        show(stages[job.status] || text("Procesando la lista…", "Processing playlist…"));
+        window.setTimeout(() => void poll(), 4000);
+      }
+    } catch {
+      if (token !== renderToken) return;
+      show(text("No se pudo consultar el estado de la importación.", "Couldn't check import progress."));
+      check.hidden = false;
+      submit.disabled = false;
+    }
+  }
+  check.addEventListener("click", () => void poll());
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!input.value.trim()) return;
+    submit.disabled = true;
+    check.hidden = true;
+    show(text("Añadiendo la playlist a la cola…", "Adding the playlist to the queue…"));
+    try {
+      const result = await api.importPlaylist(input.value.trim());
+      jobId = result.job_id;
+      sessionStorage.setItem("upspotify-import-job", jobId);
+      if (token === renderToken) void poll();
+    } catch {
+      if (token !== renderToken) return;
+      show(text("No se pudo importar. Verifica el enlace y que la playlist sea pública o no listada.", "Could not import. Verify the link and that the playlist is public or unlisted."));
+      submit.disabled = false;
+    }
+  });
+  if (jobId) {
+    show(text("Consultando la importación…", "Checking import progress…"));
+    void poll();
+  }
+}
+
 type LibraryTab = "tracks" | "artists" | "playlists" | "videos";
 
 async function renderLibrary(root: HTMLElement, token: number, tab: LibraryTab): Promise<void> {
   skeletonView(root);
-  const data = await getBootstrap().catch(() => null);
+  const data = await getBootstrap(true).catch(() => null);
   if (!data || token !== renderToken) {
-    if (token === renderToken) root.replaceChildren(errorState("The library could not be loaded."));
+    if (token === renderToken) root.replaceChildren(errorState(text("No se pudo cargar la biblioteca.", "The library could not be loaded.")));
     return;
   }
 
   const wrap = document.createElement("div");
   wrap.innerHTML = `
     <div class="page-head">
-      <div><div class="eyebrow">Your library</div><h1>Everything indexed</h1>
-      <p>${fmtCount(data.library.songs)} songs · ${fmtCount(data.library.artists)} artists · ${fmtCount(data.library.synced)} with synced lyrics</p></div>
+      <div><h1>${text("Biblioteca", "Everything indexed")}</h1>
+      <p>${fmtCount(data.library.songs)} ${text("canciones", "songs")} · ${fmtCount(data.library.artists)} ${text("artistas", "artists")} · ${fmtCount(data.library.synced)} ${text("con letra sincronizada", "with synced lyrics")}</p></div>
     </div>
     <div class="library-toolbar">
-      <button class="chip ${tab === "tracks" ? "is-active" : ""}" data-library-tab="tracks">${iconMarkup("music", "", 14)} Tracks</button>
-      <button class="chip ${tab === "artists" ? "is-active" : ""}" data-library-tab="artists">${iconMarkup("headphones", "", 14)} Artists</button>
-      <button class="chip ${tab === "playlists" ? "is-active" : ""}" data-library-tab="playlists">${iconMarkup("list", "", 14)} Playlists</button>
-      <button class="chip ${tab === "videos" ? "is-active" : ""}" data-library-tab="videos">${iconMarkup("video", "", 14)} Videos</button>
+      <button class="chip ${tab === "tracks" ? "is-active" : ""}" aria-pressed="${tab === "tracks"}" data-library-tab="tracks">${iconMarkup("music", "", 14)} ${text("Canciones", "Tracks")}</button>
+      <button class="chip ${tab === "artists" ? "is-active" : ""}" aria-pressed="${tab === "artists"}" data-library-tab="artists">${iconMarkup("headphones", "", 14)} ${text("Artistas", "Artists")}</button>
+      <button class="chip ${tab === "playlists" ? "is-active" : ""}" aria-pressed="${tab === "playlists"}" data-library-tab="playlists">${iconMarkup("list", "", 14)} ${text("Listas", "Playlists")}</button>
+      <button class="chip ${tab === "videos" ? "is-active" : ""}" aria-pressed="${tab === "videos"}" data-library-tab="videos">${iconMarkup("video", "", 14)} ${text("Videos", "Videos")}</button>
       <span class="spacer"></span>
       <span class="select-wrap" id="lib-controls"></span>
     </div>
@@ -882,44 +788,57 @@ async function renderLibrary(root: HTMLElement, token: number, tab: LibraryTab):
       return;
     }
     if (token !== renderToken) return;
+    if (!all.length) {
+      body.innerHTML = `<p class="course-status">${text("No hay canciones en el catálogo. Agrega una playlist para comenzar.", "The catalogue is empty. Add a playlist to get started.")}</p><a class="btn btn-primary" href="#/import">${text("Agregar canciones", "Add songs")}</a>`;
+      return;
+    }
     const languages = [...new Set(all.map((track) => track.language).filter(Boolean))];
     let language = "";
+    let filter = "";
     let sort: "artist" | "title" | "duration" = "artist";
     let shown = 150;
 
     controls.innerHTML = `
-      <select class="select" aria-label="Filter by language" id="lib-language">
-        <option value="">All languages</option>
+      <label class="sr-only" for="lib-filter">${text("Filtrar por título o artista", "Filter by title or artist")}</label>
+      <input class="select" id="lib-filter" type="search" placeholder="${text("Título o artista", "Title or artist")}" />
+      <select class="select" aria-label="${text("Filtrar por idioma", "Filter by language")}" id="lib-language">
+        <option value="">${text("Todos los idiomas", "All languages")}</option>
         ${languages.map((code) => `<option value="${code}">${escapeHtml(code.toUpperCase())}</option>`).join("")}
       </select>
       <span style="width:8px"></span>
-      <select class="select" aria-label="Sort tracks" id="lib-sort">
-        <option value="artist">Artist A–Z</option>
-        <option value="title">Title A–Z</option>
-        <option value="duration">Longest first</option>
+      <select class="select" aria-label="${text("Ordenar canciones", "Sort tracks")}" id="lib-sort">
+        <option value="artist">${text("Artista A–Z", "Artist A–Z")}</option>
+        <option value="title">${text("Título A–Z", "Title A–Z")}</option>
+        <option value="duration">${text("Mayor duración", "Longest first")}</option>
       </select>`;
     const languageSelect = controls.querySelector<HTMLSelectElement>("#lib-language")!;
     const sortSelect = controls.querySelector<HTMLSelectElement>("#lib-sort")!;
+    const filterInput = controls.querySelector<HTMLInputElement>("#lib-filter")!;
     const summary = document.createElement("div");
     summary.className = "shelf-sub";
     summary.style.margin = "4px 2px 10px";
 
     const paint = () => {
       let list = language ? all.filter((track) => track.language === language) : [...all];
+      if (filter) {
+        const folded = (value: string) => value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+        list = list.filter((track) => folded(`${track.title} ${track.artist}`).includes(folded(filter)));
+      }
       if (sort === "title") list.sort((a, b) => a.title.localeCompare(b.title));
       else if (sort === "duration") list.sort((a, b) => (b.duration || 0) - (a.duration || 0));
       else list.sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title));
-      summary.textContent = `${list.length} tracks · ${fmtDuration(
+      summary.textContent = `${list.length} ${text("canciones", "tracks")} · ${fmtDuration(
         list.reduce((sum, track) => sum + (track.duration || 0), 0),
       )}`;
       const holder = document.createElement("div");
       holder.appendChild(summary);
-      holder.appendChild(trackTable(list.slice(0, shown), "library:tracks", list));
+      if (list.length) holder.appendChild(trackTable(list.slice(0, shown), "library:tracks", list));
+      else holder.append(text("No hay canciones con este filtro.", "No songs match this filter."));
       if (shown < list.length) {
         const more = document.createElement("button");
         more.className = "btn btn-ghost btn-sm";
         more.style.marginTop = "16px";
-        more.textContent = `Load ${Math.min(150, list.length - shown)} more of ${list.length}`;
+        more.textContent = text(`Ver ${Math.min(150, list.length - shown)} más`, `Show ${Math.min(150, list.length - shown)} more`);
         more.addEventListener("click", () => {
           shown += 150;
           paint();
@@ -930,6 +849,11 @@ async function renderLibrary(root: HTMLElement, token: number, tab: LibraryTab):
     };
     languageSelect.addEventListener("change", () => {
       language = languageSelect.value;
+      shown = 150;
+      paint();
+    });
+    filterInput.addEventListener("input", () => {
+      filter = filterInput.value.trim();
       shown = 150;
       paint();
     });
@@ -1069,9 +993,9 @@ async function renderArtist(root: HTMLElement, token: number, artistId: string):
           <span>${tracks.filter((track) => track.synced_lyrics).length} synced</span>
         </div>
         <div class="collection-actions">
-          <button class="btn btn-primary" data-play-artist>${iconMarkup("play", "", 17)} Play</button>
-          <button class="btn btn-ghost" data-shuffle-artist>${iconMarkup("shuffle", "", 16)} Shuffle</button>
-          <button class="btn btn-outline" data-radio-artist>${iconMarkup("radio", "", 15)} Radio</button>
+          <button class="btn btn-primary" data-play-artist>${iconMarkup("play", "", 17)} ${text("Reproducir", "Play")}</button>
+          <button class="btn btn-ghost" data-shuffle-artist>${iconMarkup("shuffle", "", 16)} ${text("Aleatorio", "Shuffle")}</button>
+          <button class="btn btn-outline" data-radio-artist>${iconMarkup("radio", "", 15)} ${text("Radio", "Radio")}</button>
         </div>
       </div>
     </div>`;
@@ -1092,7 +1016,7 @@ async function renderArtist(root: HTMLElement, token: number, artistId: string):
 
   const trackSection = document.createElement("section");
   trackSection.className = "shelf";
-  trackSection.innerHTML = `<div class="shelf-head"><div><div class="shelf-title"><h2>Popular tracks</h2></div>
+  trackSection.innerHTML = `<div class="shelf-head"><div><div class="shelf-title"><h2>${text("Canciones destacadas", "Popular tracks")}</h2></div>
     <div class="shelf-sub">Ordered by centrality in the lyric similarity model</div></div></div>`;
   trackSection.appendChild(trackTable(tracks, sourceKey));
   wrap.appendChild(trackSection);
@@ -1168,9 +1092,9 @@ async function renderPlaylist(root: HTMLElement, token: number, playlistId: stri
       <span>${playlist.synced ?? "—"} synced</span>
     </div>
     <div class="collection-actions">
-      <button class="btn btn-primary" data-play-playlist>${iconMarkup("play", "", 17)} Play</button>
-      <button class="btn btn-ghost" data-shuffle-playlist>${iconMarkup("shuffle", "", 16)} Shuffle</button>
-      <button class="btn btn-outline" data-radio-playlist>${iconMarkup("radio", "", 15)} Radio</button>
+      <button class="btn btn-primary" data-play-playlist>${iconMarkup("play", "", 17)} ${text("Reproducir", "Play")}</button>
+      <button class="btn btn-ghost" data-shuffle-playlist>${iconMarkup("shuffle", "", 16)} ${text("Aleatorio", "Shuffle")}</button>
+      <button class="btn btn-outline" data-radio-playlist>${iconMarkup("radio", "", 15)} ${text("Radio", "Radio")}</button>
     </div>`;
   hero.appendChild(body);
 
@@ -1194,7 +1118,7 @@ async function renderPlaylist(root: HTMLElement, token: number, playlistId: stri
 
   const section = document.createElement("section");
   section.className = "shelf";
-  section.innerHTML = `<div class="shelf-head"><div><div class="shelf-title"><h2>Tracklist</h2></div>
+  section.innerHTML = `<div class="shelf-head"><div><div class="shelf-title"><h2>${text("Canciones", "Tracklist")}</h2></div>
     <div class="shelf-sub">${playlist.subtitle || "Built from your indexed library"}</div></div></div>`;
   const tableHolder = document.createElement("div");
   section.appendChild(tableHolder);
@@ -1248,7 +1172,7 @@ async function renderVideos(root: HTMLElement, token: number): Promise<void> {
   const wrap = document.createElement("div");
   wrap.innerHTML = `
     <div class="page-head">
-      <div><div class="eyebrow">Music videos</div><h1>Press play, watch it</h1>
+      <div><h1>${text("Videos musicales", "Press play, watch it")}</h1>
       <p>Every indexed track also streams as video. Theater mode keeps the lyrics beside it.</p></div>
     </div>`;
   const grid = document.createElement("div");
@@ -1297,8 +1221,10 @@ export function parseRoute(): Route {
   const raw = location.hash.replace(/^#\/?/, "");
   const [path] = raw.split("?");
   const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
-  if (!parts.length) return { name: "home" };
+  if (!parts.length) return { name: "search" };
   const [head, ...rest] = parts;
+  if (head === "discover" || head === "home") return { name: "home" };
+  if (head === "import") return { name: "import" };
   if (head === "search") return { name: "search", query: rest.join("/") };
   if (head === "library") {
     const tab = rest[0];
@@ -1307,7 +1233,7 @@ export function parseRoute(): Route {
   if (head === "artist" && rest[0]) return { name: "artist", param: rest[0] };
   if (head === "playlist" && rest[0]) return { name: "playlist", param: rest[0] };
   if (head === "videos") return { name: "videos" };
-  return { name: "home" };
+  return { name: "search" };
 }
 
 export async function renderRoute(route: Route = parseRoute()): Promise<void> {
@@ -1320,6 +1246,7 @@ export async function renderRoute(route: Route = parseRoute()): Promise<void> {
   try {
     if (route.name === "search") await renderSearch(root, token, route.query || "");
     else if (route.name === "library") await renderLibrary(root, token, (route.param as LibraryTab) || "tracks");
+    else if (route.name === "import") renderImport(root, token);
     else if (route.name === "artist" && route.param) await renderArtist(root, token, route.param);
     else if (route.name === "playlist" && route.param) await renderPlaylist(root, token, route.param);
     else if (route.name === "videos") await renderVideos(root, token);

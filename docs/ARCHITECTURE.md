@@ -93,11 +93,15 @@ it writes to.
 | `GetFailedSongs`, `RetryFailed`, `MatrixPreview` | go-webui | admin views |
 | `IndexPlaylistFromBot` | agents (gRPC path) | mirrors the HTTP bot endpoint |
 
-`search` and `recommendations` are the two calls that expose ranking logic, so the
-Astro layer answers them over gRPC. The rest of the player surface (catalogue
-shaping, byte-range video proxy, playback session) is proxied server-side by the
-same Astro route: the browser still only talks to one origin, and no database
-driver exists in the web image.
+Astro uses gRPC for search suggestions, radio recommendations and lyrics.
+UPSpotify's `/api/player/course-search` calls the HTTP backend through the same
+server-side proxy as catalogue, media and playback session endpoints. The
+browser talks to one origin.
+
+The search view tokenizes the query for each supported language and ranks up
+to 10 tracks with TF-IDF cosine scores. For each result, the backend selects an
+excerpt and up to three tracks from the lyric cosine matrix after excluding
+the entire top 10.
 
 ## Recommendations without a user profile
 

@@ -1,0 +1,61 @@
+.language-select {
+  min-height: 44px;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--line-bright);
+  border-radius: 0.35rem;
+  background: var(--bg-1);
+  color: var(--text-1);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+#lyrics-sync {
+  color: var(--text-2);
+}
+
+.topbar,
+.sidebar,
+.player-bar {
+  background: var(--bg-0);
+  backdrop-filter: none;
+}
+
+body[data-search-landing="true"] .topbar .searchbar {
+  display: none;
+}
+
+.index-link,
+.course-import {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  color: var(--accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 0.24em;
+}
+
+.course-import {
+  margin-top: 0.65rem;
+}
+
+@media (max-width: 560px) {
+  .topbar-actions #btn-lyrics-top {
+    display: none;
+  }
+
+  .language-select {
+    max-width: 100px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

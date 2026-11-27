@@ -832,7 +832,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 40px;
+  min-height: 44px;
   padding: 0 18px;
   border-radius: var(--radius-pill);
   font-size: 13px;
@@ -857,15 +857,16 @@
 
 .btn-primary {
   color: var(--accent-contrast);
-  background: linear-gradient(150deg, #fff, color-mix(in oklab, var(--accent-strong) 78%, #fff));
-  box-shadow: 0 10px 28px -12px color-mix(in oklab, var(--accent) 75%, transparent);
+  background: var(--accent);
 }
 
 .btn-accent {
   color: var(--accent-contrast);
-  background: linear-gradient(145deg, var(--accent-strong), var(--accent));
-  box-shadow: var(--shadow-accent);
+  background: var(--accent);
 }
+
+.btn-primary:hover:not(:disabled), .btn-accent:hover:not(:disabled) { background: var(--accent-strong); }
+.btn:disabled { opacity: .65; transform: none; }
 
 .btn-ghost {
   color: var(--text-1);
@@ -1068,7 +1069,7 @@
   box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 45%, transparent);
 }
 
-/* mobile player: track + transport + one queue button, no stray second row */
+/* Keep lyrics and queue reachable directly from the mobile player. */
 @media (max-width: 980px) {
   .player-bar {
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1079,9 +1080,17 @@
     justify-content: flex-end;
   }
 
-  .player-actions > *:not(#btn-queue) {
+  .player-actions > *:not(#btn-queue):not(#btn-lyrics) {
     display: none !important;
   }
+
+  .player-actions #btn-queue, .player-actions #btn-lyrics { width: 44px; height: 44px; }
+}
+
+@media (max-width: 460px) {
+  .player-bar { padding-inline: 8px; gap: 4px; }
+  .transport-buttons #btn-prev { display: none; }
+  .player-actions { gap: 0; }
 }
 
 .icon-btn.is-loading svg {

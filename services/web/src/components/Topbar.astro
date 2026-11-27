@@ -1,56 +1,63 @@
 ---
 import Icon from "./Icon.astro";
+import { LANGUAGE_COOKIE, resolveLanguage, translator } from "../lib/locale";
+
+const lang = resolveLanguage(Astro.url, Astro.cookies.get(LANGUAGE_COOKIE)?.value);
+const text = translator(lang);
 ---
 
 <header class="topbar" id="topbar">
-  <button class="icon-btn mobile-only" id="btn-menu" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+  <button class="icon-btn mobile-only" id="btn-menu" aria-label={text("Abrir navegación", "Open navigation")} aria-expanded="false" aria-controls="sidebar">
     <Icon name="menu" />
   </button>
 
   <div class="history-nav">
-    <button class="icon-btn round" id="btn-back" aria-label="Go back" data-tip="Back">
+    <button class="icon-btn round" id="btn-back" aria-label={text("Atrás", "Go back")}>
       <Icon name="arrow-left" size={17} />
     </button>
-    <button class="icon-btn round" id="btn-forward" aria-label="Go forward" data-tip="Forward">
+    <button class="icon-btn round" id="btn-forward" aria-label={text("Adelante", "Go forward")}>
       <Icon name="arrow-right" size={17} />
     </button>
   </div>
 
-  <form class="searchbar" id="search-form" role="search" autocomplete="off">
+  <form class="searchbar" id="search-form" role="search" aria-label={text("Búsqueda rápida", "Quick search")} autocomplete="off">
     <Icon name="search" />
     <input
       id="search-input"
       type="search"
       name="q"
-      placeholder="Search songs, artists or lyrics"
-      aria-label="Search songs, artists or lyrics"
+      placeholder={text("Buscar por letra", "Search by lyrics")}
+      aria-label={text("Busca una canción por su letra", "Find a song by lyrics")}
+      maxlength="200"
       spellcheck="false"
       enterkeyhint="search"
     />
     <kbd aria-hidden="true">/</kbd>
-    <button class="icon-btn tiny" id="search-clear" type="button" aria-label="Clear search" hidden>
+    <button class="icon-btn tiny" id="search-clear" type="button" aria-label={text("Borrar búsqueda", "Clear search")} hidden>
       <Icon name="close" size={15} />
     </button>
-    <button class="sr-only" type="submit">Search</button>
+    <button class="sr-only" type="submit">{text("Buscar", "Search")}</button>
     <div class="search-suggest" id="search-suggest" hidden></div>
   </form>
 
   <div class="topbar-actions">
-    <button
-      class="icon-btn desktop-only"
-      id="btn-adaptive"
-      aria-label="Adapt colours to the cover"
-      aria-pressed="true"
-      data-tip="Adaptive colour"
-    >
-      <Icon name="palette" />
+    <select class="language-select" id="language-select" aria-label={text("Idioma", "Language")}>
+      <option value="es" lang="es" selected={lang === "es"}>Español</option>
+      <option value="en" lang="en" selected={lang === "en"}>English</option>
+    </select>
+    <button class="icon-btn theme-toggle" type="button" id="theme-toggle"
+      aria-label={text("Modo oscuro", "Dark mode")} aria-pressed="true" title={text("Cambiar tema", "Change theme")}>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+        stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"></circle>
+        <path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4m0-14.2-1.4 1.4M6.3 17.7l-1.4 1.4"></path>
+      </svg>
     </button>
-    <button class="icon-btn desktop-only" id="btn-queue-top" aria-label="Open queue" aria-pressed="false" data-tip="Queue">
+    <button class="icon-btn desktop-only" id="btn-queue-top" aria-label={text("Abrir cola", "Open queue")} aria-pressed="false">
       <Icon name="queue" />
     </button>
-    <button class="icon-btn" id="btn-lyrics-top" aria-label="Open lyrics" aria-pressed="false" data-tip="Lyrics">
+    <button class="icon-btn" id="btn-lyrics-top" aria-label={text("Abrir letra", "Open lyrics")} aria-pressed="false">
       <Icon name="mic" />
     </button>
-    <a class="avatar" href="#/library" id="btn-profile" aria-label="Your indexed library" data-tip="Your library">L</a>
   </div>
 </header>

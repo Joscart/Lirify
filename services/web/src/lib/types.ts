@@ -2,6 +2,7 @@ export type ViewName =
   | "home"
   | "search"
   | "library"
+  | "import"
   | "artist"
   | "playlist"
   | "videos";
@@ -28,6 +29,21 @@ export interface Track {
   score?: number;
   snippet?: string;
   youtube_url?: string;
+}
+
+export interface CourseMatch extends Track {
+  score: number;
+}
+
+export interface CourseResult extends CourseMatch {
+  snippet: string;
+  recommendations: CourseMatch[];
+}
+
+export interface CourseSearchPayload {
+  query: string;
+  scanned: number;
+  results: CourseResult[];
 }
 
 export interface Artist {

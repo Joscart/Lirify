@@ -14,12 +14,13 @@ import re
 import subprocess
 import threading
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import requests
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -33,7 +34,8 @@ except Exception:
 
 from lyrics_sources import PROVIDERS as LYRICS_PROVIDERS
 from lyrics_sources import fetch_lyrics, lyrics_to_text, probe_instrumental
-from bot_api import TERMINAL_ERRORS, build_bot_router, classify_playlist_error
+from bot_api import TERMINAL_ERRORS, build_bot_router, classify_playlist_error, validate_playlist_url
+from course_search import rank_catalogue
 from store import get_store, new_job_id
 from vector import embed_lyrics, get_vector_store
 
@@ -79,7 +81,7 @@ _LAST_REV_CHECK = 0.0
 _RELOAD_LOCK = asyncio.Lock()
 _RELOAD_TASK: "asyncio.Task[None] | None" = None
 
-app = FastAPI(title="Lirify API", version="1.0.0")
+app = FastAPI(title="UPSpotify API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -241,8 +243,12 @@ except Exception:  # pragma: no cover
     STEMMERS = {}
 
 
+_FOLD_ACCENTS = str.maketrans("áéíóúü", "aeiouu")
+
+
 def remove_special(text: str) -> str:
-    return re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
+    text = unicodedata.normalize("NFC", text.casefold()).translate(_FOLD_ACCENTS)
+    return re.sub(r"[^a-z0-9ñ]+", " ", text).strip()
 
 
 def normalize_name(text: str) -> str:
@@ -285,12 +291,13 @@ SPANISH_HINTS = {
 }
 
 
+def clean_lyrics(text: str) -> str:
+    return TIMESTAMP_RE.sub(" ", LRC_META_RE.sub("", text or ""))
+
+
 def normalize_lyrics(text: str, lang: str) -> List[str]:
-    text = TIMESTAMP_RE.sub(" ", text or "")
-    text = remove_special(text)
-    stop = set(STOPWORDS)
-    if lang == "es":
-        stop |= _SPANISH_STOP
+    text = remove_special(clean_lyrics(text))
+    stop = _SPANISH_STOP if lang == "es" else STOPWORDS
     stemmer = STEMMERS.get(lang)
     tokens = []
     for word in text.split():
@@ -968,11 +975,10 @@ async def stage_matrix(batch: Dict[str, Any]) -> None:
                 if not song.get("lyrics", "").strip():
                     continue
                 language = detect_language(song["lyrics"])
-                song["language"] = language
                 if language not in ALLOWED_LANGUAGES:
                     continue
                 seen.add(video_id)
-                combined.append(song)
+                combined.append({**song, "language": language})
             added = max(len(combined) - len(previous), 0)
 
             if added == 0:
@@ -1869,6 +1875,44 @@ def search(q: str, limit: int = 20):
     return {"query": q, "results": results}
 
 
+@app.get("/api/player/course-search")
+def course_search(q: str = Query(max_length=200)):
+    query = q.strip()
+    # Index rebuilds replace the arrays and catalog as a group. Hold references
+    # to this revision for the complete ranking and response.
+    state = STATE.copy()
+    songs = state["songs"]
+    tokens = {lang: normalize_lyrics(query, lang) for lang in sorted(ALLOWED_LANGUAGES)}
+    ranked = rank_catalogue(state, tokens)
+    tracks = {}
+
+    def track(index: int):
+        if index not in tracks:
+            tracks[index] = _track_brief(songs[index])
+        return tracks[index]
+
+    results = []
+    for index, score, recommendations in ranked:
+        song = songs[index]
+        lang = song["language"]
+        query_terms = set(tokens[lang])
+        lines = [line.strip() for line in clean_lyrics(song["lyrics"]).splitlines() if line.strip()]
+        snippet = max(
+            lines, key=lambda line: len(query_terms.intersection(normalize_lyrics(line, lang))),
+            default="",
+        )
+        if len(snippet) > 160:
+            snippet = snippet[:159].rstrip() + "…"
+        results.append({
+            **track(index),
+            "score": score,
+            "snippet": snippet,
+            "recommendations": [{**track(i), "score": similarity} for i, similarity in recommendations],
+        })
+
+    return {"query": query, "scanned": len(songs), "results": results}
+
+
 def _summary(song: Dict[str, Any], score: float) -> Dict[str, Any]:
     return {
         "video_id": song["video_id"],
@@ -2007,6 +2051,23 @@ def job_snapshot(job_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+@app.post("/api/player/import", status_code=202)
+async def player_import(inp: UrlIn):
+    url = validate_playlist_url(inp.url)
+    if inp.limit is not None and not 1 <= inp.limit <= 500:
+        raise HTTPException(400, "Invalid song limit")
+    job_id = await enqueue_playlist(url, inp.limit, "astro-webui")
+    return {"job_id": job_id}
+
+
+@app.get("/api/player/import/{job_id}")
+def player_import_status(job_id: str):
+    job = job_snapshot(job_id)
+    if not job:
+        raise HTTPException(404, "Unknown import job")
+    return {key: job.get(key) for key in ("status", "stage", "added", "error")}
+
+
 app.include_router(
     build_bot_router(
         enqueue=enqueue_playlist,
@@ -2024,5 +2085,6 @@ app.include_router(
 # The routes live in player_api.py and only read the state built above. They never
 # change indexing, ranking, search or recommendation behaviour.
 from player_api import build_router as _build_player_router
+from player_api import track_brief as _track_brief
 
 app.include_router(_build_player_router(lambda: STATE, search, recommend))

@@ -6,12 +6,6 @@ import type { SessionPayload, StreamPayload, Track } from "./types";
 type Mode = "audio" | "video";
 type Repeat = "off" | "all" | "one";
 
-interface AlignedClock {
-  position: number;
-  at: number;
-  playing: boolean;
-}
-
 export interface PlayerState {
   queue: Track[];
   order: number[];
@@ -278,7 +272,6 @@ export class PlayerEngine {
   private pendingStreams = new Map<string, Promise<StreamPayload>>();
   private preloader: HTMLAudioElement | null = null;
   private playToken = 0;
-  private clock: AlignedClock | null = null;
   private sessionTimer: number | undefined;
   private sessionInFlight = false;
   private likes = new Set<string>();
@@ -806,7 +799,6 @@ export class PlayerEngine {
         /* no media yet */
       }
     }
-    this.clock = this.clock ? { ...this.clock, position: target, at: performance.now() } : null;
     emit("seek", target);
     emit("playback", this.state);
     this.postSession();
@@ -1001,9 +993,10 @@ export class PlayerEngine {
   // -- playback clock / session -------------------------------------------
 
   alignedTime(): number {
-    if (!this.clock) return this.state.position;
-    if (!this.clock.playing) return this.clock.position;
-    return this.clock.position + (performance.now() - this.clock.at) / 1000;
+    if (this.state.loading) return this.state.position;
+    if (this.state.usingIframe && this.bridge) return this.bridge.position();
+    if (this.audio?.readyState > 0 && Number.isFinite(this.audio.currentTime)) return this.audio.currentTime;
+    return this.state.position;
   }
 
   sessionLine(): number | null {
@@ -1026,11 +1019,6 @@ export class PlayerEngine {
         state: this.state.playing ? "playing" : "paused",
       });
       this.state.session = session;
-      this.clock = {
-        position: typeof session.position === "number" ? session.position : position,
-        at: performance.now(),
-        playing: session.state === "playing",
-      };
       emit("session", session);
     } catch {
       /* keep interpolating locally */
@@ -1051,7 +1039,7 @@ export class PlayerEngine {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: track.title,
         artist: track.artist,
-        album: "Lirify",
+      album: "UPSpotify",
         artwork: [{ src: track.thumb, sizes: "480x360", type: "image/jpeg" }],
       });
     } catch {

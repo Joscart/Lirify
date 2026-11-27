@@ -60,12 +60,36 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
-  api:
+  # Populate the local catalogue from the committed dataset. Existing tracks
+  # are never overwritten; the API rebuilds the index after the seed exits.
+  seed-catalogue:
+    build: ./services/api
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app
     depends_on:
       db-init:
         condition: service_completed_successfully
+    volumes:
+      - ./scripts/migrate_json_to_mongo.py:/scripts/migrate_json_to_mongo.py:ro
+      - ./data/songs.json:/legacy/songs.json:ro
+    command: ["python", "/scripts/migrate_json_to_mongo.py", "--data-dir", "/legacy", "--seed-local"]
+    restart: "no"
+
+  api:
+    healthcheck:
+      start_period: 180s
+    depends_on:
+      seed-catalogue:
+        condition: service_completed_successfully
       qdrant:
         condition: service_started
+
+  go-ui:
+    profiles: ["legacy-admin", "public"]
+    environment:
+      PUBLIC_PLAYER_URL: http://localhost:4321
 
 volumes:
   mongo_data:

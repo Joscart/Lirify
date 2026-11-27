@@ -20,23 +20,9 @@ body {
   font-size: 15px;
   line-height: 1.5;
   color: var(--text-1);
-  background:
-    radial-gradient(1100px 700px at 12% -10%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 62%),
-    radial-gradient(900px 620px at 88% 0%, color-mix(in oklab, var(--accent-2) 10%, transparent), transparent 58%),
-    var(--bg-0);
+  background: var(--bg-0);
   overflow: hidden;
   transition: background-color 0.6s var(--ease-out);
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background-image: var(--grain);
-  opacity: 0.05;
-  pointer-events: none;
-  z-index: 90;
-  mix-blend-mode: overlay;
 }
 
 h1,
@@ -68,6 +54,9 @@ button {
   padding: 0;
   cursor: pointer;
 }
+
+button:disabled, select:disabled { cursor: not-allowed; }
+a[href], select, summary, label[for] { cursor: pointer; }
 
 input,
 select,

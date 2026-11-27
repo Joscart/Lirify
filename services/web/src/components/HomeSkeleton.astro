@@ -1,4 +1,6 @@
 ---
+import { LANGUAGE_COOKIE, resolveLanguage, translator } from "../lib/locale";
+const text = translator(resolveLanguage(Astro.url, Astro.cookies.get(LANGUAGE_COOKIE)?.value));
 import Icon from "./Icon.astro";
 ---
 
@@ -18,7 +20,7 @@ import Icon from "./Icon.astro";
       <div class="skeleton" style="width:210px;height:14px"></div>
       <div class="skeleton" style="width:320px;height:11px"></div>
       <div class="hero-actions">
-        <span class="btn btn-primary" style="opacity:.55"><Icon name="play" size={16} /> Play</span>
+        <span class="btn btn-primary" style="opacity:.55"><Icon name="play" size={16} /> {text("Reproducir", "Play")}</span>
         <span class="btn btn-outline" style="opacity:.55"><Icon name="radio" size={16} /> Start radio</span>
       </div>
     </div>

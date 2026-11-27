@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import threading
 import time
+import unicodedata
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
@@ -39,7 +40,8 @@ STREAM_LOCKS: Dict[Tuple[str, str], threading.Lock] = {}
 STREAM_LOCKS_GUARD = threading.Lock()
 
 DURATIONS: Dict[str, float] = {}
-_LYRIC_CACHE: Dict[Tuple[str, int], Dict[str, Any]] = {}
+_LYRIC_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_SYNC_CACHE: Dict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = {}
 _SESSION_LOCK = threading.Lock()
 _SESSION: Dict[str, Any] = {}
 
@@ -226,7 +228,7 @@ def parse_lyrics(raw: str) -> Dict[str, Any]:
 
 
 def lyrics_for(song: Dict[str, Any]) -> Dict[str, Any]:
-    key = (song.get("video_id", ""), len(song.get("lyrics") or ""))
+    key = (song.get("video_id", ""), song.get("lyrics") or "")
     cached = _LYRIC_CACHE.get(key)
     if cached is not None:
         return cached
@@ -237,6 +239,60 @@ def lyrics_for(song: Dict[str, Any]) -> Dict[str, Any]:
         _LYRIC_CACHE.clear()
     _LYRIC_CACHE[key] = parsed
     return parsed
+
+
+def _match_text(value: str) -> str:
+    folded = unicodedata.normalize("NFKC", value or "").casefold()
+    return " ".join(re.findall(r"\w+", folded))
+
+
+def playback_lyrics(song: Dict[str, Any]) -> Dict[str, Any]:
+    """Prefer stored timestamps; enrich plain lyrics for playback only."""
+    indexed = lyrics_for(song)
+    if indexed["synced"] or not indexed["lines"]:
+        return indexed
+    title = song.get("track") or song.get("title") or ""
+    artist = song.get("artist") or ""
+    if not title or not artist:
+        return indexed
+    key = (song.get("video_id", ""), song.get("lyrics") or "")
+    cached = _SYNC_CACHE.get(key)
+    if cached and time.monotonic() < cached[0]:
+        return cached[1]
+    result = indexed
+    try:
+        response = requests.get(
+            "https://lrclib.net/api/search",
+            params={"track_name": title, "artist_name": artist},
+            headers={"User-Agent": UA}, timeout=(2, 4),
+        )
+        response.raise_for_status()
+        known = DURATIONS.get(song.get("video_id", ""))
+        original_words = set(_match_text(" ".join(line["text"] for line in indexed["lines"])).split())
+        matches = []
+        for item in response.json():
+            if _match_text(item.get("trackName")) != _match_text(title) or _match_text(item.get("artistName")) != _match_text(artist):
+                continue
+            duration = float(item.get("duration") or 0)
+            if not duration or (known and abs(known - duration) > 5):
+                continue
+            candidate = parse_lyrics(item.get("syncedLyrics") or "")
+            if not candidate["synced"] or not candidate["lines"]:
+                continue
+            words = set(_match_text(" ".join(line["text"] for line in candidate["lines"])).split())
+            if len(original_words & words) / max(1, len(original_words | words)) < 0.75:
+                continue
+            matches.append((duration, candidate))
+        # Without a known recording length, reject ambiguous versions.
+        if matches and (known or max(d for d, _ in matches) - min(d for d, _ in matches) <= 5):
+            _, parsed = min(matches, key=lambda item: abs(item[0] - known) if known else 0)
+            result = {**parsed, "source": "lrclib", "language": indexed["language"]}
+    except (requests.RequestException, ValueError, TypeError, AttributeError):
+        pass
+    if len(_SYNC_CACHE) >= 400:
+        _SYNC_CACHE.clear()
+    _SYNC_CACHE[key] = (time.monotonic() + (3600 if result["synced"] else 300), result)
+    return result
 
 
 def estimated_duration(song: Dict[str, Any]) -> Tuple[float, bool]:
@@ -703,7 +759,7 @@ def build_router(
         song = song_by_id(video_id)
         if not song:
             raise HTTPException(404, "Unknown video id")
-        parsed = lyrics_for(song)
+        parsed = playback_lyrics(song)
         duration, estimated = estimated_duration(song)
         return {
             "video_id": video_id,

@@ -6,16 +6,13 @@
  *   GET  /api/player/track/{id}/lyrics   -> gRPC GetLyrics
  *   *    /api/player/<anything else>     -> server-side HTTP proxy to python-backend
  *
- * Search and recommendations are gRPC because they are the two calls that expose
- * ranking logic. The remaining player routes (catalogue shaping, stream resolution,
- * byte-range video proxy, playback session) are proxied server-side: the browser
- * still only ever talks to this origin, and no database driver exists in this
- * image.
+ * The course search, catalogue, import, lyrics, stream and playback sessions go through the
+ * HTTP proxy. The browser talks to the Astro origin for both transports.
  */
 
 import type { APIRoute } from "astro";
 
-import { lyrics, recommend, search } from "../../../lib/grpc";
+import { recommend, search } from "../../../lib/grpc";
 
 export const prerender = false;
 
@@ -108,20 +105,6 @@ export const ALL: APIRoute = async ({ params, request, url }) => {
       return new Response(JSON.stringify(payload), {
         status: 200,
         headers: { ...JSON_HEADERS, "cache-control": "no-store", "x-lirify-transport": "grpc" },
-      });
-    } catch (error) {
-      return failure(error);
-    }
-  }
-
-  // --- gRPC: lyrics -------------------------------------------------------
-  const lyricsMatch = path.match(/^track\/([^/]+)\/lyrics$/);
-  if (request.method === "GET" && lyricsMatch) {
-    try {
-      const payload = await lyrics(decodeURIComponent(lyricsMatch[1]));
-      return new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { ...JSON_HEADERS, "cache-control": "private, max-age=300", "x-lirify-transport": "grpc" },
       });
     } catch (error) {
       return failure(error);

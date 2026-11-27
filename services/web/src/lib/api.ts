@@ -1,6 +1,7 @@
 import type {
   ArtistPayload,
   Bootstrap,
+  CourseSearchPayload,
   LyricsPayload,
   PlaylistPayload,
   SearchPayload,
@@ -10,9 +11,8 @@ import type {
 } from "./types";
 
 // The browser always calls this Astro origin. `/api/player/*` is a server route:
-// search, recommendations and lyrics are answered over gRPC from python-backend,
-// and the remaining player endpoints are proxied server-side. No database host is
-// ever exposed to the client.
+// suggestions and radio use gRPC. Lyrics, course search and other player
+// endpoints use the server-side HTTP proxy.
 //
 // For local hacking you can still bypass the SSR layer by pointing
 // PUBLIC_API_BASE at the API container (http://HOST:8000).
@@ -42,7 +42,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: { Accept: "application/json", ...(init?.headers || {}) },
     });
   } catch (error) {
-    throw new ApiError("The Lirify API is unreachable.", 0);
+    throw new ApiError("The UPSpotify API is unreachable.", 0);
   }
   if (!response.ok) {
     let detail = response.statusText;
@@ -65,8 +65,16 @@ export const api = {
     ),
   track: (id: string) => request<Track & { lyrics: any }>(`/track/${id}`),
   lyrics: (id: string) => request<LyricsPayload>(`/track/${id}/lyrics`),
+  importPlaylist: (url: string) => request<{ job_id: string }>("/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  }),
+  importStatus: (id: string) => request<{ status: string; stage: string; added: number | null; error: string | null }>(`/import/${encodeURIComponent(id)}`),
   search: (query: string, limit = 24) =>
     request<SearchPayload>(`/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  courseSearch: (query: string) =>
+    request<CourseSearchPayload>(`/course-search?q=${encodeURIComponent(query)}`),
   radio: (id: string, limit = 16, seeds: string[] = []) =>
     request<{ seed: Track; recommendations: Track[]; engine?: string }>(
       `/radio/${id}?limit=${limit}${seeds.length ? `&seeds=${encodeURIComponent(seeds.join(","))}` : ""}`,

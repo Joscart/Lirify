@@ -66,7 +66,27 @@ def read_json(path: Path) -> Any:
         return json.load(handle)
 
 
-def migrate(data_dir: Path, dry_run: bool, limit: Optional[int]) -> Dict[str, int]:
+def song_update(song: Dict[str, Any], now: float, insert_only: bool) -> Optional[Dict[str, Any]]:
+    video_id = song.get("video_id") or ""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id) or not (song.get("lyrics") or "").strip():
+        return None
+    fields = {
+        "videoId": video_id,
+        "title": song.get("title") or "",
+        "youtubeTitle": song.get("youtube_title") or song.get("title") or "",
+        "artist": song.get("artist") or "",
+        "language": song.get("language") or "unknown",
+        "lyrics": song.get("lyrics") or "",
+        "backend": song.get("backend") or "",
+        "schemaVersion": SCHEMA_VERSION,
+        "updatedAt": now,
+    }
+    if insert_only:
+        return {"$setOnInsert": {**fields, "createdAt": now}}
+    return {"$set": fields, "$setOnInsert": {"createdAt": now}}
+
+
+def migrate(data_dir: Path, dry_run: bool, limit: Optional[int], seed_local: bool = False) -> Dict[str, int]:
     from pymongo import MongoClient, UpdateOne
 
     uri = (os.environ.get("MONGODB_URI") or os.environ.get("MONGO_URI") or "").strip()
@@ -74,6 +94,18 @@ def migrate(data_dir: Path, dry_run: bool, limit: Optional[int]) -> Dict[str, in
         raise SystemExit("MONGODB_URI is not set (export it or add it to .env)")
 
     database = os.environ.get("MONGODB_DB") or db_name_from_uri(uri)
+    if seed_local:
+        from pymongo.uri_parser import parse_uri
+
+        if parse_uri(uri)["nodelist"] != [("mongo", 27017)]:
+            raise SystemExit("Local catalogue seed requires the Compose mongo service")
+        if not dry_run:
+            from store import MongoStore
+
+            schema = MongoStore(uri, database)
+            if schema.init_error:
+                raise SystemExit("Could not initialize the local database schema")
+            schema.client.close()
     print(f"target: {redact(uri)} db={database} dry_run={dry_run}")
     client = MongoClient(uri, serverSelectionTimeoutMS=10000)
     client.admin.command("ping")
@@ -89,30 +121,9 @@ def migrate(data_dir: Path, dry_run: bool, limit: Optional[int]) -> Dict[str, in
             songs = songs[:limit]
         ops = []
         for song in songs:
-            video_id = song.get("video_id") or ""
-            if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
-                continue
-            if not (song.get("lyrics") or "").strip():
-                continue
-            ops.append(
-                UpdateOne(
-                    {"videoId": video_id},
-                    {
-                        "$set": {
-                            "title": song.get("title") or "",
-                            "youtubeTitle": song.get("youtube_title") or song.get("title") or "",
-                            "artist": song.get("artist") or "",
-                            "language": song.get("language") or "unknown",
-                            "lyrics": song.get("lyrics") or "",
-                            "backend": song.get("backend") or "",
-                            "schemaVersion": SCHEMA_VERSION,
-                            "updatedAt": now,
-                        },
-                        "$setOnInsert": {"createdAt": now},
-                    },
-                    upsert=True,
-                )
-            )
+            update = song_update(song, now, seed_local)
+            if update is not None:
+                ops.append(UpdateOne({"videoId": song["video_id"]}, update, upsert=True))
         if ops and not dry_run:
             result = db["songs"].bulk_write(ops, ordered=False)
             counts["songs"] = int(result.upserted_count + result.modified_count)
@@ -125,6 +136,10 @@ def migrate(data_dir: Path, dry_run: bool, limit: Optional[int]) -> Dict[str, in
         else:
             counts["songs"] = len(ops)
         print(f"songs:        {counts['songs']} {'would be ' if dry_run else ''}upserted")
+
+    if seed_local:
+        client.close()
+        return counts
 
     # --- lyric cache -------------------------------------------------------
     cache_dir = data_dir / "cache" / "lyrics"
@@ -244,6 +259,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument("--env-file", default=".env", help="File to read MONGODB_URI from if unset")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=None, help="Import at most N songs (testing)")
+    parser.add_argument("--seed-local", action="store_true", help="Insert missing catalogue songs in Compose MongoDB only; preserve existing songs")
     args = parser.parse_args(list(argv) if argv else None)
 
     root = Path(__file__).resolve().parent.parent
@@ -251,7 +267,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     data_dir = Path(args.data_dir)
     if not data_dir.is_dir():
         raise SystemExit(f"data directory not found: {data_dir}")
-    migrate(data_dir, args.dry_run, args.limit)
+    migrate(data_dir, args.dry_run, args.limit, args.seed_local)
     return 0
 
 

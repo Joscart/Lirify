@@ -1,44 +1,46 @@
 ---
+import { LANGUAGE_COOKIE, resolveLanguage, translator } from "../lib/locale";
+const text = translator(resolveLanguage(Astro.url, Astro.cookies.get(LANGUAGE_COOKIE)?.value));
 import Icon from "./Icon.astro";
 ---
 
-<aside class="lyrics-panel" id="lyrics-panel" aria-label="Synced lyrics" aria-hidden="true">
+<aside class="lyrics-panel" id="lyrics-panel" aria-label={text("Letra sincronizada", "Synced lyrics")} aria-hidden="true">
   <div class="lyrics-head">
+    <img id="lyrics-cover" class="lyrics-cover" width="64" height="64" alt="" hidden />
     <div class="lyrics-track">
-      <span class="eyebrow">Lyrics</span>
-      <b id="lyrics-title">Nothing playing</b>
-      <span id="lyrics-artist">Choose a track to follow along</span>
+      <span class="eyebrow">{text("Letra", "Lyrics")}</span>
+      <b id="lyrics-title">{text("Nada en reproducción", "Nothing playing")}</b>
+      <span id="lyrics-artist">{text("Elige una canción para ver la letra", "Choose a track to follow along")}</span>
     </div>
     <div class="lyrics-tools">
-      <div class="lyrics-offset" aria-label="Lyrics offset">
-        <button id="lyrics-offset-minus" aria-label="Show lyrics earlier">−</button>
-        <span id="lyrics-offset">0.0s</span>
-        <button id="lyrics-offset-plus" aria-label="Show lyrics later">+</button>
-      </div>
-      <button class="icon-btn tiny" id="lyrics-expand" aria-label="Expand lyrics" data-tip="Expand">
+      <button class="icon-btn tiny" id="lyrics-expand" aria-label={text("Expandir letra", "Expand lyrics")} data-tip="Expand">
         <Icon name="expand" size={15} />
       </button>
-      <button class="icon-btn tiny" id="lyrics-close" aria-label="Close lyrics">
+      <button class="icon-btn tiny" id="lyrics-close" aria-label={text("Cerrar letra", "Close lyrics")}>
         <Icon name="close" size={15} />
       </button>
     </div>
   </div>
 
   <div class="lyrics-meta">
-    <span class="chip" id="lyrics-source">lyrics</span>
-    <span class="chip" id="lyrics-sync" data-state="plain">waiting</span>
+    <span id="lyrics-sync" role="status"></span>
     <span class="spacer"></span>
+    <div class="lyrics-offset" aria-label={text("Ajustar sincronización", "Adjust timing")}>
+      <button id="lyrics-offset-minus" disabled aria-label={text("Atrasar letra", "Show lyrics later")}>−</button>
+      <span id="lyrics-offset">0.0s</span>
+      <button id="lyrics-offset-plus" disabled aria-label={text("Adelantar letra", "Show lyrics earlier")}>+</button>
+    </div>
   </div>
 
   <div class="lyrics-body" id="lyrics-body">
     <div class="lyrics-lines" id="lyrics-list"></div>
-    <div class="lyrics-empty" id="lyrics-empty" hidden>
+    <div class="lyrics-empty" id="lyrics-empty" role="status">
       <Icon name="mic" size={34} />
-      <p data-empty-text>Play a track to load its lyrics.</p>
+      <p data-empty-text>{text("Reproduce una canción para cargar su letra.", "Play a track to load its lyrics.")}</p>
     </div>
-    <button class="lyrics-follow" id="lyrics-follow" type="button">
-      <Icon name="wave" size={14} />
-      Follow lyrics
-    </button>
   </div>
+  <button class="btn btn-primary lyrics-follow" id="lyrics-follow" type="button" hidden>
+      <Icon name="wave" size={14} />
+      {text("Seguir la letra", "Follow lyrics")}
+  </button>
 </aside>

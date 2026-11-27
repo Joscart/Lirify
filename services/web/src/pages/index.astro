@@ -9,6 +9,13 @@ import Theater from "../components/Theater.astro";
 import MiniPlayer from "../components/MiniPlayer.astro";
 import CardTemplates from "../components/CardTemplates.astro";
 import HomeSkeleton from "../components/HomeSkeleton.astro";
+import { LANGUAGE_COOKIE, resolveLanguage, translator } from "../lib/locale";
+
+const lang = resolveLanguage(Astro.url, Astro.cookies.get(LANGUAGE_COOKIE)?.value);
+const text = translator(lang);
+if (Astro.url.searchParams.get("lang") === lang) {
+  Astro.cookies.set(LANGUAGE_COOKIE, lang, { path: "/", maxAge: 31_536_000, sameSite: "lax" });
+}
 ---
 
 <Layout>
@@ -33,7 +40,7 @@ import HomeSkeleton from "../components/HomeSkeleton.astro";
   <Theater />
   <MiniPlayer />
   <CardTemplates />
-  <div class="ctx-menu" id="ctx-menu" role="menu" aria-label="Track actions"></div>
+  <div class="ctx-menu" id="ctx-menu" role="menu" aria-label={text("Acciones de la canción", "Track actions")}></div>
 </Layout>
 
 <script>

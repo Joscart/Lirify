@@ -36,6 +36,9 @@ env:
   NODE_VERSION: "22"
 
 jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+
   # ---------------------------------------------------------------------------
   # 1. Contract + build verification. No cloud credentials in this job.
   # ---------------------------------------------------------------------------
@@ -94,6 +97,7 @@ jobs:
       - name: Go build and vet
         working-directory: services/go-ui
         run: |
+          go test ./...
           go build ./...
           go vet ./...
 
@@ -157,7 +161,7 @@ jobs:
   # ---------------------------------------------------------------------------
   images:
     name: Build and push images
-    needs: [verify, preflight]
+    needs: [verify, preflight, quality]
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'Lirify' }}
     outputs:

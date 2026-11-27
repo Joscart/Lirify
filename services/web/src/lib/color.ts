@@ -180,10 +180,10 @@ export function applyAccent(accent: string): void {
   currentAccent = accent;
   const root = document.documentElement;
   const hsv = hexToHsv(accent);
-  root.style.setProperty("--accent", accent);
-  root.style.setProperty("--accent-strong", withHue(accent, 0, 1, 1.12));
-  root.style.setProperty("--accent-deep", withHue(accent, -8, 1, 0.72));
-  root.style.setProperty("--accent-2", withHue(accent, 46, 0.95, 1.02));
+  root.style.setProperty("--adaptive-accent", accent);
+  root.style.setProperty("--adaptive-strong", withHue(accent, 0, 1, 1.12));
+  root.style.setProperty("--adaptive-deep", withHue(accent, -8, 1, 0.72));
+  root.style.setProperty("--adaptive-secondary", withHue(accent, 46, 0.95, 1.02));
   root.style.setProperty("--art-1", accent);
   root.style.setProperty("--art-2", withHue(accent, -38, 0.9, 0.82));
   if (hsv) root.style.setProperty("--art-h", String(Math.round(hsv.h)));
@@ -195,7 +195,7 @@ export function currentArtAccent(): string {
 }
 
 export function brandAccent(): string {
-  return "#b48bff";
+  return "#72dcc2";
 }
 
 export function resetAccent(): void {

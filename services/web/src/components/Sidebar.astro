@@ -1,9 +1,13 @@
 ---
 import Icon from "./Icon.astro";
+import { LANGUAGE_COOKIE, resolveLanguage, translator } from "../lib/locale";
+
+const lang = resolveLanguage(Astro.url, Astro.cookies.get(LANGUAGE_COOKIE)?.value);
+const text = translator(lang);
 ---
 
-<aside class="sidebar" id="sidebar" aria-label="Primary navigation">
-  <a class="brand" href="#/" aria-label="Lirify home">
+<aside class="sidebar" id="sidebar" aria-label={text("Navegación principal", "Primary navigation")}>
+  <a class="brand" href="#/" aria-label={text("Inicio de UPSpotify", "UPSpotify home")}>
     <span class="brand-mark" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none">
         <path
@@ -16,33 +20,36 @@ import Icon from "./Icon.astro";
         <circle cx="14.4" cy="15.7" r="2.5" fill="currentColor"></circle>
       </svg>
     </span>
-    <span class="brand-name">lirify<span>.</span></span>
-    <span class="brand-tag">lyrics first</span>
+    <span class="brand-name">UP<span>Spotify</span></span>
   </a>
 
-  <nav class="nav" aria-label="Browse">
-    <a class="nav-item is-active" href="#/" data-nav="home">
-      <Icon name="home" />
-      <span>Home</span>
-    </a>
-    <a class="nav-item" href="#/search" data-nav="search">
+  <nav class="nav" aria-label={text("Explorar música", "Browse music")}>
+    <a class="nav-item is-active" href="#/search" data-nav="search" aria-current="page">
       <Icon name="search" />
-      <span>Search</span>
+      <span>{text("Buscar", "Search")}</span>
+    </a>
+    <a class="nav-item" href="#/discover" data-nav="home">
+      <Icon name="compass" />
+      <span>{text("Descubrir", "Discover")}</span>
     </a>
     <a class="nav-item" href="#/library" data-nav="library">
       <Icon name="library" />
-      <span>Your library</span>
+      <span>{text("Biblioteca", "Library")}</span>
     </a>
     <a class="nav-item" href="#/videos" data-nav="videos">
       <Icon name="video" />
-      <span>Music videos</span>
+      <span>{text("Videos musicales", "Music videos")}</span>
+    </a>
+    <a class="nav-item" href="#/import" data-nav="import">
+      <Icon name="plus" />
+      <span>{text("Agregar canciones", "Add songs")}</span>
     </a>
   </nav>
 
   <div class="sidebar-section">
     <div class="sidebar-heading">
-      <span>Playlists</span>
-      <a class="icon-btn tiny" href="#/library/playlists" aria-label="All playlists">
+      <span>{text("Listas", "Playlists")}</span>
+      <a class="icon-btn tiny" href="#/library/playlists" aria-label={text("Todas las listas", "All playlists")}>
         <Icon name="plus" size={15} />
       </a>
     </div>
@@ -61,16 +68,14 @@ import Icon from "./Icon.astro";
 
   <div class="sidebar-foot">
     <div class="index-card">
-      <div class="ring" id="index-ring" style="--p: 0"><span id="index-score">0</span></div>
       <div class="meta">
-        <b id="index-title">Reading index…</b>
-        <span id="index-meta">Loading library</span>
-        <a class="index-link" id="indexer-link" href="http://localhost:8080" target="_blank" rel="noreferrer">
-          Indexer <Icon name="external" size={11} />
+        <b id="index-title">{text("Cargando catálogo…", "Loading catalogue…")}</b>
+        <a class="index-link" id="indexer-link" href="#/library">
+          {text("Ver catálogo", "View catalogue")}
         </a>
       </div>
     </div>
   </div>
 </aside>
 
-<button class="scrim" id="scrim" aria-label="Close navigation"></button>
+<button class="scrim" id="scrim" tabindex="-1" aria-label={text("Cerrar navegación", "Close navigation")}></button>

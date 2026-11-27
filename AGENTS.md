@@ -15,9 +15,10 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   `MONGODB_URI`/`QDRANT_URL` point at (Atlas + Qdrant Cloud in this checkout).
   For containerised databases add the overlay:
   `docker compose -f docker-compose.yml -f docker-compose.local-db.yml up -d --build`
-  which also starts `mongo`, `db-init`, `qdrant` and `api`
+  which also starts `mongo`, `db-init`, `seed-catalogue`, `qdrant` and `api`
   (8000 → REST + gRPC h2c behind the in-container mux, 50051 direct gRPC),
-  `go-ui` (8080), `web` (4321 host → 8080 container). Configuration comes from `.env` (copy
+  `web` (4321 host → 8080 container). The local Go dashboard is optional via
+  `--profile legacy-admin` (8081 host → 8080 container). Configuration comes from `.env` (copy
   `.env.example`); `db-init` creates the database + app user before the API boots.
 - Local compose runs unlimited on purpose: `MAX_INDEXED_SONGS=-1`,
   `PUBLIC_RATE_LIMIT_PER_MINUTE=0`, `BOT_RATE_LIMIT=0`. Production uses 1000 /
@@ -31,11 +32,11 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   - `cd services/web && npm run build`
   - `./scripts/gen_proto.sh --check` (fails if generated stubs drift)
 - Smoke-test: `curl localhost:8000/health`, `/stats`, `/queue`, `/cache`,
-  `/providers`, `/api/v1/bot/health`; then `curl localhost:8080/health` (process), `curl localhost:8080/readyz`
+  `/providers`, `/api/v1/bot/health`; then `curl localhost:8081/health` (process), `curl localhost:8081/readyz`
   (gRPC to python-backend) and `curl localhost:4321/health`.
 - gRPC check: `grpcurl -proto proto/lirify.proto -plaintext localhost:8000 \
   lirify.v1.LirifyService/GetIndexStats`.
-- Index via the Go UI, `docker compose exec api python ws_client.py "<url>" index [limit]`,
+- Index via the Astro player at `/#/import`, the legacy Go UI, `docker compose exec api python ws_client.py "<url>" index [limit]`,
   `POST /queue`, or the bot API (`POST /api/v1/bot/index-playlist`).
 - Player dev: `cd services/web && npm run dev` (SSR; needs `GRPC_TARGET` and
   `PYTHON_BACKEND_URL`). `PUBLIC_API_BASE=http://HOST:8000` bypasses the SSR
@@ -50,6 +51,9 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 - `services/api/app/main.py` is the core monolith: committed `STATE` (an
   in-memory cache), lyric normalization, scraping, queue workers, TF-IDF/matrices,
   search, recommend, bot router and the legacy `/ws` stream.
+- `services/api/app/course_search.py` ranks the UPSpotify search view. The HTTP
+  route `/api/player/course-search` adds lyric excerpts and song metadata using
+  one snapshot of `STATE`.
 - `services/api/app/store.py` is the **only** Mongo access layer (collections,
   validators, indexes). It falls back to `MemoryStore` when `MONGODB_URI` is unset
   (local dev only). No module may write to the container filesystem.
@@ -125,8 +129,9 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 
 ## Gotchas
 
-- `data/` is legacy: the refactor removed every local JSON read/write. It is no
-  longer mounted by `docker compose`. Do not reintroduce file I/O in the API.
+- `data/` is legacy: the running API never reads or writes JSON files. The local
+  database overlay seeds missing songs from `data/songs.json` using the one-shot
+  migration service. Do not reintroduce file I/O in the running API.
 - MongoDB is configured by a **connection string only**: `MONGODB_URI` (alias
   `MONGO_URI`) for the API, `MONGO_ROOT_URI` for the one-shot `db-init`. The
   database name is derived from the URI path when `MONGODB_DB` is unset.

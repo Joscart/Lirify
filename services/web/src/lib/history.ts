@@ -6,8 +6,6 @@
  * localStorage, so a Cloud Run cold start cannot lose them and a different device
  * simply starts with its own empty history.
  *
- * The onboarding gate uses `hasOnboarded()`: a first-time browser must run at
- * least one search before the home view fetches personalised recommendations.
  */
 
 import type { Track } from "./types";
@@ -100,11 +98,6 @@ export function seeds(limit = 5): string[] {
 export function playCount(videoId: string): number {
   const entry = getHistory().find((row) => row.video_id === videoId);
   return entry?.plays || 0;
-}
-
-/** A browser is onboarded once it has searched at least once. */
-export function hasOnboarded(): boolean {
-  return getSearches().length > 0;
 }
 
 export function clearHistory(): void {

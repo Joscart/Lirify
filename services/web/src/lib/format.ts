@@ -1,3 +1,5 @@
+import { text } from "./locale";
+
 export function fmtTime(seconds: number | null | undefined): string {
   if (!seconds || !Number.isFinite(seconds) || seconds < 0) return "0:00";
   const total = Math.floor(seconds);
@@ -18,17 +20,16 @@ export function fmtDuration(seconds: number | null | undefined): string {
 }
 
 export function fmtCount(value: number): string {
-  return new Intl.NumberFormat("en", { notation: value > 9999 ? "compact" : "standard" }).format(
+  return new Intl.NumberFormat(text("es-EC", "en-US"), { notation: value > 9999 ? "compact" : "standard" }).format(
     value || 0,
   );
 }
 
 export function greeting(): string {
   const hour = new Date().getHours();
-  if (hour < 5) return "Still up";
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
+  if (hour < 12) return text("Buenos días", "Good morning");
+  if (hour < 18) return text("Buenas tardes", "Good afternoon");
+  return text("Buenas noches", "Good evening");
 }
 
 export function escapeHtml(text: unknown): string {

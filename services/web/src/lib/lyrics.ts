@@ -1,3 +1,4 @@
+import { text } from "./locale";
 import { api } from "./api";
 import { emit, on } from "./bus";
 import { escapeHtml } from "./format";
@@ -26,7 +27,7 @@ interface LyricsView {
 }
 
 const OFFSET_KEY = "lirify.lyrics.offset.v1";
-const cache = new Map<string, LyricsPayload>();
+const cache = new Map<string, { payload: LyricsPayload; expires: number }>();
 
 function parseOffset(): number {
   const stored = Number(localStorage.getItem(OFFSET_KEY));
@@ -61,6 +62,7 @@ class LyricsController {
     if (this.theaterMount && theaterBody) {
       this.views.push({ mount: this.theaterMount, scroller: theaterBody, lines: [], active: -1, wordIndex: -1 });
       theaterBody.addEventListener("wheel", () => this.noteUserScroll(), { passive: true });
+      theaterBody.addEventListener("touchstart", () => this.noteUserScroll(), { passive: true });
     }
     const empty = document.getElementById("lyrics-empty");
     if (empty) this.emptyEls.push(empty);
@@ -79,6 +81,7 @@ class LyricsController {
   }
 
   private noteUserScroll(): void {
+    if (!this.data?.synced) return;
     this.lastUserScroll = Date.now();
     this.following = false;
     emit("lyrics:follow", false);
@@ -129,7 +132,13 @@ class LyricsController {
 
     const titleEl = document.getElementById("lyrics-title");
     const artistEl = document.getElementById("lyrics-artist");
-    const sourceEl = document.getElementById("lyrics-source");
+    const cover = document.getElementById("lyrics-cover") as HTMLImageElement | null;
+    if (cover) {
+      cover.hidden = !track.thumb;
+      if (track.thumb) cover.src = track.thumb;
+      cover.onerror = () => { cover.hidden = true; };
+    }
+
     const syncEl = document.getElementById("lyrics-sync");
     const theaterTitle = document.getElementById("theater-title");
     const theaterArtist = document.getElementById("theater-artist");
@@ -137,28 +146,28 @@ class LyricsController {
     if (artistEl) artistEl.textContent = track.artist;
     if (theaterTitle) theaterTitle.textContent = track.title;
     if (theaterArtist) theaterArtist.textContent = track.artist;
-    if (sourceEl) sourceEl.textContent = track.lyrics_source || "lyrics";
-    if (syncEl) {
-      syncEl.textContent = track.synced_lyrics ? "synced" : "unsynced";
-      syncEl.dataset.state = track.synced_lyrics ? "synced" : "plain";
-    }
+
+    if (syncEl) syncEl.textContent = text("Cargando letra…", "Loading lyrics…");
+    const theaterSync = document.getElementById("theater-lyrics-sync");
+    if (theaterSync) theaterSync.textContent = text("Cargando letra…", "Loading lyrics…");
+    this.setTimingControls(false);
     this.showLoading();
 
     const cached = cache.get(track.id);
-    if (cached) {
-      this.apply(cached);
+    if (cached && cached.expires > Date.now()) {
+      this.apply(cached.payload);
       return;
     }
     try {
       const payload = await api.lyrics(track.id);
       if (token !== this.token) return;
       if (cache.size > 120) cache.clear();
-      cache.set(track.id, payload);
+      cache.set(track.id, { payload, expires: Date.now() + (payload.synced ? 3_600_000 : 300_000) });
       this.apply(payload);
     } catch (error) {
       if (token !== this.token) return;
       this.loading = false;
-      this.renderEmpty("Lyrics could not be loaded for this track.");
+      this.renderEmpty(text("No pudimos cargar la letra. Vuelve a reproducir la canción para reintentar.", "Couldn't load lyrics. Play the song again to retry."));
       emit("lyrics:loaded", null);
     }
   }
@@ -181,6 +190,11 @@ class LyricsController {
   }
 
   private renderEmpty(message: string): void {
+    this.setTimingControls(false);
+    for (const id of ["lyrics-sync", "theater-lyrics-sync"]) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = "";
+    }
     for (const view of this.views) {
       view.mount.innerHTML = "";
       view.mount.classList.remove("is-loading");
@@ -201,19 +215,21 @@ class LyricsController {
       .map((line) => line.t as number);
     this.active = -1;
 
-    const sourceEl = document.getElementById("lyrics-source");
-    const syncEl = document.getElementById("lyrics-sync");
-    if (sourceEl) sourceEl.textContent = payload.source || "lyrics";
-    if (syncEl) {
-      syncEl.textContent = payload.synced ? "synced" : "unsynced";
-      syncEl.dataset.state = payload.synced ? "synced" : "plain";
+    const source = payload.source === "lrclib" ? "LRCLIB" : text("catálogo", "catalogue");
+    const label = payload.synced
+      ? text(`Sincronizada · ${source}`, `Synced · ${source}`)
+      : text(`Letra sin sincronización · ${source}`, `Unsynced lyrics · ${source}`);
+    for (const id of ["lyrics-sync", "theater-lyrics-sync"]) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = label;
     }
+    this.setTimingControls(payload.synced);
 
     if (!payload.lines?.length) {
       this.renderEmpty(
         payload.source === "instrumental"
-          ? "This track is instrumental — no lyrics were found."
-          : "No lyrics are indexed for this track yet.",
+          ? text("Esta canción es instrumental.", "This track is instrumental.")
+          : text("Esta canción no tiene letra disponible.", "No lyrics are available for this track."),
       );
       return;
     }
@@ -240,11 +256,11 @@ class LyricsController {
   }
 
   private renderLine(line: LyricLine, index: number, payload: LyricsPayload): RenderedLine {
-    const element = document.createElement("button");
-    element.type = "button";
+    const element = document.createElement(line.t === null || !payload.synced ? "p" : "button");
+    if (element instanceof HTMLButtonElement) element.type = "button";
     element.className = "lyric-line";
     element.style.setProperty("--i", String(Math.min(index, 24)));
-    if (line.t === null) {
+    if (line.t === null || !payload.synced) {
       element.classList.add("is-unsynced");
       element.innerHTML = `<span class="lyr-word"><span class="lyr-word__text">${escapeHtml(line.text)}</span></span>`;
       return { el: element, words: [], start: 0, end: 0 };
@@ -253,9 +269,6 @@ class LyricsController {
     const nextLine = payload.lines[index + 1];
     const end = nextLine?.t !== null && nextLine?.t !== undefined ? nextLine.t : line.t + 4.5;
     const words: RenderedWord[] = [];
-    const text = line.text || "♪";
-    const parts = text.split(/(\s+)/).filter((part) => part.trim().length);
-
     if (line.words?.length) {
       const explicit = line.words;
       explicit.forEach((word, wordIndex) => {
@@ -267,20 +280,7 @@ class LyricsController {
         element.appendChild(document.createTextNode(" "));
         words.push({ el: span, start: word.t, end: wordEnd });
       });
-    } else {
-      const totalChars = parts.reduce((sum, part) => sum + part.length + 1, 0) || 1;
-      let cursor = line.t;
-      parts.forEach((part) => {
-        const duration = ((part.length + 1) / totalChars) * Math.max(0.8, end - line.t);
-        const span = document.createElement("span");
-        span.className = "lyr-word";
-        span.innerHTML = `<span class="lyr-word__text">${escapeHtml(part)}</span>`;
-        element.appendChild(span);
-        element.appendChild(document.createTextNode(" "));
-        words.push({ el: span, start: cursor, end: cursor + duration });
-        cursor += duration;
-      });
-    }
+    } else element.textContent = line.text;
     return { el: element, words, start: line.t, end };
   }
 
@@ -344,6 +344,9 @@ class LyricsController {
     // Mark the lines around the active one so the fade reads as a gradient.
     view.lines.forEach((line, lineIndex) => {
       line.el.classList.toggle("is-near", Math.abs(lineIndex - index) === 1);
+      line.el.classList.toggle("is-past", lineIndex < index);
+      if (lineIndex === index) line.el.setAttribute("aria-current", "true");
+      else line.el.removeAttribute("aria-current");
     });
   }
 
@@ -378,13 +381,13 @@ class LyricsController {
     if (!smooth && Date.now() - this.lastUserScroll < 1800) return;
     const views = only ? [only] : this.views;
     for (const view of views) {
-      if (view.active < 0) continue;
+      if (view.active < 0 || !view.scroller.clientHeight) continue;
       const line = view.lines[view.active];
       if (!line) continue;
-      const top =
-        line.el.offsetTop - view.scroller.clientHeight / 2 + line.el.clientHeight / 2;
+      const top = view.scroller.scrollTop + line.el.getBoundingClientRect().top -
+        view.scroller.getBoundingClientRect().top - view.scroller.clientHeight / 2 + line.el.clientHeight / 2;
       try {
-        view.scroller.scrollTo({ top: Math.max(0, top), behavior: smooth ? "smooth" : "auto" });
+        view.scroller.scrollTo({ top: Math.max(0, top), behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       } catch {
         view.scroller.scrollTop = Math.max(0, top);
       }
@@ -393,6 +396,13 @@ class LyricsController {
 
   hasLyrics(): boolean {
     return !!this.data?.lines.length;
+  }
+
+  private setTimingControls(enabled: boolean): void {
+    for (const id of ["lyrics-offset-minus", "lyrics-offset-plus"]) {
+      const button = document.getElementById(id) as HTMLButtonElement | null;
+      if (button) button.disabled = !enabled;
+    }
   }
 
   isLoading(): boolean {

@@ -1,6 +1,6 @@
 import { api } from "./api";
+import { inLanguage, language, text } from "./locale";
 import { emit, on } from "./bus";
-import { applyTrackAccent, resetAccent } from "./color";
 import { clamp, debounce, escapeHtml, fmtTime, seededBars } from "./format";
 import { iconMarkup } from "./icons";
 import { lyrics } from "./lyrics";
@@ -24,11 +24,18 @@ import {
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
 const $$ = <T extends HTMLElement = HTMLElement>(selector: string) =>
   Array.from(document.querySelectorAll<T>(selector));
+const mobileNavigation = matchMedia("(max-width: 980px)");
 
-const ADAPTIVE_KEY = "lirify.adaptive.v1";
+function setMobileMenu(open: boolean): void {
+  document.body.dataset.menu = open ? "open" : "closed";
+  $("btn-menu")?.setAttribute("aria-expanded", String(open));
+  const sidebar = $("sidebar");
+  if (sidebar) sidebar.inert = mobileNavigation.matches && !open;
+  if (open) sidebar?.querySelector<HTMLElement>(".nav-item")?.focus();
+}
+
 const MINI_KEY = "lirify.mini.v1";
 
-let adaptive = localStorage.getItem(ADAPTIVE_KEY) !== "off";
 let lastWaveId = "__unset__";
 let contextPayload: any = null;
 let contextOpenedAt = 0;
@@ -93,16 +100,15 @@ function renderPlayerMeta(): void {
   const artist = $("pb-artist");
   const art = $<HTMLImageElement>("pb-art-img");
   const fallback = $("pb-art-fallback");
-  const badge = $("pb-badge");
   const like = $("btn-like");
   const miniTitle = $("mini-title");
   const miniArtist = $("mini-artist");
   const miniArt = $<HTMLImageElement>("mini-art");
   const miniFallback = $("mini-art-fallback");
 
-  if (title) title.textContent = track?.title || "Nothing playing";
-  if (artist) artist.textContent = track?.artist || "Pick a track to start";
-  if (miniTitle) miniTitle.textContent = track?.title || "Nothing playing";
+  if (title) title.textContent = track?.title || text("Nada en reproducción", "Nothing playing");
+  if (artist) artist.textContent = track?.artist || text("Elige una canción para empezar", "Pick a track to start");
+  if (miniTitle) miniTitle.textContent = track?.title || text("Nada en reproducción", "Nothing playing");
   if (miniArtist) miniArtist.textContent = track?.artist || "—";
 
   if (track) {
@@ -113,25 +119,6 @@ function renderPlayerMeta(): void {
     if (fallback) fallback.style.display = "grid";
     if (miniArt) miniArt.hidden = true;
     if (miniFallback) miniFallback.style.display = "grid";
-  }
-
-  if (badge) {
-    if (!track) {
-      badge.textContent = "idle";
-      badge.dataset.state = "plain";
-    } else if (player.state.usingIframe) {
-      badge.textContent = "youtube fallback";
-      badge.dataset.state = "plain";
-    } else if (player.state.mode === "video") {
-      badge.textContent = "video";
-      badge.dataset.state = "synced";
-    } else if (track.synced_lyrics) {
-      badge.textContent = "synced lyrics";
-      badge.dataset.state = "synced";
-    } else {
-      badge.textContent = "audio";
-      badge.dataset.state = "plain";
-    }
   }
 
   if (like && track) {
@@ -146,9 +133,9 @@ function renderPlayerMeta(): void {
   const theaterTrackArtist = $("theater-track-artist");
   const theaterArt = $<HTMLImageElement>("theater-art");
   const theaterCover = $<HTMLImageElement>("theater-cover");
-  if (theaterTitle) theaterTitle.textContent = track?.title || "Theater";
-  if (theaterArtist) theaterArtist.textContent = track?.artist || "Nothing playing";
-  if (theaterTrack) theaterTrack.textContent = track?.title || "Nothing playing";
+  if (theaterTitle) theaterTitle.textContent = track?.title || text("Video", "Theater");
+  if (theaterArtist) theaterArtist.textContent = track?.artist || text("Nada en reproducción", "Nothing playing");
+  if (theaterTrack) theaterTrack.textContent = track?.title || text("Nada en reproducción", "Nothing playing");
   if (theaterTrackArtist) theaterTrackArtist.textContent = track?.artist || "";
   if (track) {
     if (theaterArt) setImage(theaterArt, null, track.thumb, track.art);
@@ -163,7 +150,7 @@ function renderPlayerMeta(): void {
     openYt.style.visibility = track ? "visible" : "hidden";
   }
 
-  document.title = track ? `${track.title} · ${track.artist} — Lirify` : "Lirify — your indexed music";
+  document.title = track ? `${track.title} · ${track.artist} — UPSpotify` : text("UPSpotify · Busca canciones por su letra", "UPSpotify · Find songs by lyrics");
 }
 
 function renderTransport(): void {
@@ -175,9 +162,9 @@ function renderTransport(): void {
     const playing = state.playing;
     if (playIcon) playIcon.hidden = playing;
     if (pauseIcon) pauseIcon.hidden = !playing;
-    play.setAttribute("aria-label", playing ? "Pause" : "Play");
+    play.setAttribute("aria-label", playing ? text("Pausar", "Pause") : text("Reproducir", "Play"));
     play.dataset.loading = String(state.loading && !state.playing);
-    play.dataset.tip = state.loading ? "Loading…" : playing ? "Pause" : "Play";
+    play.dataset.tip = state.loading ? text("Cargando…", "Loading…") : playing ? text("Pausar", "Pause") : text("Reproducir", "Play");
   }
   const theaterPlay = $("t-play");
   if (theaterPlay) {
@@ -202,7 +189,7 @@ function renderTransport(): void {
     repeat.setAttribute("aria-pressed", String(isOn));
     repeat.setAttribute(
       "aria-label",
-      state.repeat === "one" ? "Repeat one" : state.repeat === "all" ? "Repeat all" : "Repeat off",
+      state.repeat === "one" ? text("Repetir una", "Repeat one") : state.repeat === "all" ? text("Repetir todas", "Repeat all") : text("Repetición desactivada", "Repeat off"),
     );
     repeat.innerHTML = iconMarkup(state.repeat === "one" ? "repeat-one" : "repeat", "", 16);
   }
@@ -211,7 +198,7 @@ function renderTransport(): void {
   if (mute) {
     const icon = state.muted || state.volume === 0 ? "volume-mute" : state.volume < 0.45 ? "volume-low" : "volume-high";
     mute.innerHTML = iconMarkup(icon, "", 17);
-    mute.setAttribute("aria-label", state.muted ? "Unmute" : "Mute");
+    mute.setAttribute("aria-label", state.muted ? text("Activar sonido", "Unmute") : text("Silenciar", "Mute"));
   }
   const fill = $("volume-fill");
   if (fill) fill.style.setProperty("--v", `${Math.round((state.muted ? 0 : state.volume) * 100)}%`);
@@ -221,7 +208,7 @@ function renderTransport(): void {
   const video = $("btn-video");
   video?.classList.toggle("is-on", state.mode === "video");
   const theaterModeLabel = $("theater-mode-label");
-  if (theaterModeLabel) theaterModeLabel.textContent = state.mode === "video" ? "Audio mode" : "Watch video";
+  if (theaterModeLabel) theaterModeLabel.textContent = state.mode === "video" ? text("Modo audio", "Audio mode") : text("Ver video", "Watch video");
   const theaterMode = $("theater-mode");
   if (theaterMode) theaterMode.classList.toggle("is-on", state.mode === "video");
   $("theater-video")?.classList.toggle("is-video", state.mode === "video");
@@ -312,28 +299,6 @@ function renderAllChrome(): void {
 // Accent
 // ---------------------------------------------------------------------------
 
-async function refreshAccent(track?: Track | null): Promise<void> {
-  const adaptiveButton = $("btn-adaptive");
-  adaptiveButton?.setAttribute("aria-pressed", String(adaptive));
-  adaptiveButton?.classList.toggle("is-on", adaptive);
-  if (!adaptive) {
-    resetAccent();
-    return;
-  }
-  const target = track === undefined ? player.state.current : track;
-  if (target) {
-    await applyTrackAccent(target, true);
-  } else {
-    const data = currentBootstrap();
-    if (data?.hero) await applyTrackAccent(data.hero, true);
-    else applyTrackAccent(null, false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Sidebar
-// ---------------------------------------------------------------------------
-
 function fillSidebar(data: Bootstrap): void {
   const list = $("sidebar-playlists");
   if (list) {
@@ -351,7 +316,7 @@ function fillSidebar(data: Bootstrap): void {
           )}">
             ${cover ? `<img src="${cover}" alt="" loading="lazy" />` : `<span class="mosaic"></span>`}
             <span class="meta"><b>${escapeHtml(playlist.title)}</b><span>${playlist.count} ${
-              playlist.count === 1 ? "track" : "tracks"
+              playlist.count === 1 ? text("canción", "track") : text("canciones", "tracks")
             }</span></span>
           </a>
         </li>`;
@@ -359,18 +324,10 @@ function fillSidebar(data: Bootstrap): void {
       .join("");
   }
   const title = $("index-title");
-  const meta = $("index-meta");
-  const score = $("index-score");
-  const ring = $("index-ring");
-  if (title) title.textContent = `${data.library.songs} songs indexed`;
-  if (meta)
-    meta.textContent = `${data.library.terms.toLocaleString()} terms · ${data.library.synced} synced`;
-  const pct = Math.min(100, Math.round((data.library.synced / Math.max(1, data.library.songs)) * 100));
-  if (score) score.textContent = `${pct}%`;
-  if (ring) ring.style.setProperty("--p", String(pct));
-  const indexer = $<HTMLAnchorElement>("indexer-link");
-  const indexerBase = (window as any).__LIRIFY_INDEXER__;
-  if (indexer && indexerBase) indexer.href = indexerBase;
+  if (title) title.textContent = text(
+    `${data.library.songs} canciones en el catálogo`,
+    `${data.library.songs} songs in the catalogue`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -382,11 +339,13 @@ function navKey(): string {
   if (route.name === "home") return "home";
   if (route.name === "search") return "search";
   if (route.name === "videos") return "videos";
+  if (route.name === "import") return "import";
   return "library";
 }
 
 function onRouteChange(): void {
   const route = parseRoute();
+  document.body.dataset.searchLanding = String(route.name === "search" && !route.query);
   lastRouteName = route.name;
   $$("[data-nav]").forEach((item) => {
     const active = item.dataset.nav === navKey();
@@ -560,7 +519,10 @@ function setLyricsOpen(open: boolean): void {
     if (panel?.classList.contains("is-expanded")) {
       panel.classList.remove("is-expanded");
       const expand = $("lyrics-expand");
-      if (expand) expand.innerHTML = iconMarkup("expand", "", 15);
+      if (expand) {
+        expand.innerHTML = iconMarkup("expand", "", 15);
+        expand.setAttribute("aria-label", text("Expandir letra", "Expand lyrics"));
+      }
     }
   } else {
     if (window.innerWidth < 1180) setQueueOpen(false);
@@ -582,8 +544,11 @@ function toggleLyricsExpand(): void {
     panel.style.setProperty("--cover-url", `url("${track.thumb}")`);
   }
   $("lyrics-expand")!.innerHTML = iconMarkup(expanded ? "minimize" : "expand", "", 15);
-  $("lyrics-expand")?.setAttribute("aria-label", expanded ? "Shrink lyrics" : "Expand lyrics");
-  if (expanded) lyrics.tick(true);
+  $("lyrics-expand")?.setAttribute("aria-label", expanded ? text("Contraer letra", "Shrink lyrics") : text("Expandir letra", "Expand lyrics"));
+  if (expanded) {
+    lyrics.tick(true);
+    lyrics.follow();
+  }
 }
 
 function setQueueOpen(open: boolean): void {
@@ -612,13 +577,14 @@ function setTheaterOpen(open: boolean): void {
     setMini(false);
     renderTheater();
     lyrics.tick(true);
+    lyrics.follow();
   }
 }
 
 function openTheater(forceVideo = false): void {
   const track = player.state.current;
   if (!track) {
-    addToast("Play a track first to open the theater.");
+    addToast(text("Reproduce una canción para abrir el video.", "Play a track first to open the theater."));
     return;
   }
   setTheaterOpen(true);
@@ -654,7 +620,7 @@ function renderTheater(): void {
   const empty = $("theater-empty");
   if (empty) empty.hidden = true;
   const modeLabel = $("theater-mode-label");
-  if (modeLabel) modeLabel.textContent = isVideo ? "Audio mode" : "Watch video";
+  if (modeLabel) modeLabel.textContent = isVideo ? text("Modo audio", "Audio mode") : text("Ver video", "Watch video");
   const toggle = $("theater-lyrics-toggle");
   toggle?.setAttribute("aria-pressed", String(!theater?.classList.contains("is-lyrics-hidden")));
 }
@@ -680,15 +646,15 @@ function queueRow(
   options: { current?: boolean; orderPosition?: number; related?: boolean } = {},
 ): string {
   const remove = options.related
-    ? `<button class="icon-btn tiny" data-related-add="${track.id}" aria-label="Add to queue">${iconMarkup("plus", "", 14)}</button>`
+    ? `<button class="icon-btn tiny" data-related-add="${track.id}" aria-label="${text("Agregar a la cola", "Add to queue")}">${iconMarkup("plus", "", 14)}</button>`
     : options.current
-      ? `<button class="icon-btn tiny" data-queue-toggle aria-label="Play or pause">${iconMarkup(
+      ? `<button class="icon-btn tiny" data-queue-toggle aria-label="${text("Reproducir o pausar", "Play or pause")}">${iconMarkup(
           player.state.playing ? "pause" : "play",
           "",
           14,
         )}</button>`
       : options.orderPosition !== undefined
-        ? `<button class="icon-btn tiny" data-q-remove="${options.orderPosition}" aria-label="Remove from queue">${iconMarkup(
+        ? `<button class="icon-btn tiny" data-q-remove="${options.orderPosition}" aria-label="${text("Quitar de la cola", "Remove from queue")}">${iconMarkup(
             "close",
             "",
             14,
@@ -761,7 +727,7 @@ function renderRelated(host: HTMLElement, tracks: Track[]): void {
         <span class="grip">${String(index + 1).padStart(2, "0")}</span>
         <img src="${track.thumb}" alt="" loading="lazy" />
         <div class="meta"><b>${escapeHtml(track.title)}</b><span>${escapeHtml(track.artist)}</span></div>
-        <button class="icon-btn tiny" data-related-add="${track.id}" aria-label="Add to queue">${iconMarkup(
+        <button class="icon-btn tiny" data-related-add="${track.id}" aria-label="${text("Agregar a la cola", "Add to queue")}">${iconMarkup(
           "plus",
           "",
           14,
@@ -778,7 +744,7 @@ function bindQueue(): void {
   $("queue-clear")?.addEventListener("click", () => {
     player.clearUpcoming();
     renderQueue();
-    addToast("Cleared the upcoming queue");
+    addToast(text("Cola vaciada", "Cleared the upcoming queue"));
   });
   $("queue-automix")?.addEventListener("click", () => {
     player.setAutomix(!player.state.automix);
@@ -857,7 +823,7 @@ function openContext(payload: any): void {
     items = [
       { label: "Play now", icon: "play", action: "play" },
       { label: "Play next", icon: "list", action: "next" },
-      { label: "Add to queue", icon: "plus", action: "queue" },
+      { label: text("Agregar a la cola", "Add to queue"), icon: "plus", action: "queue" },
       { label: "Start radio", icon: "radio", action: "radio" },
       { separator: true, label: "", icon: "", action: "" },
       { label: "Watch music video", icon: "video", action: "video" },
@@ -878,7 +844,7 @@ function openContext(payload: any): void {
       playlist.tag || "playlist",
     )}</span>`;
     items = [
-      { label: "Play", icon: "play", action: "playlist-play" },
+      { label: text("Reproducir", "Play"), icon: "play", action: "playlist-play" },
       { label: "Shuffle", icon: "shuffle", action: "playlist-shuffle" },
       { label: "Open playlist", icon: "list", action: "playlist-open" },
       { separator: true, label: "", icon: "", action: "" },
@@ -932,8 +898,8 @@ function bindContext(): void {
       else if (action === "playlist-copy") {
         navigator.clipboard
           ?.writeText(`${location.origin}${location.pathname}#/playlist/${playlist.id}`)
-          .then(() => addToast("Playlist link copied"))
-          .catch(() => addToast("Could not copy the link", "error"));
+          .then(() => addToast(text("Enlace de la lista copiado", "Playlist link copied")))
+          .catch(() => addToast(text("No se pudo copiar el enlace", "Could not copy the link"), "error"));
       }
       return;
     }
@@ -954,13 +920,13 @@ function bindContext(): void {
     } else if (action === "like") {
       const liked = player.toggleLike(track.id);
       syncLikeButtons(track.id, liked);
-      addToast(liked ? "Added to your liked songs" : "Removed from liked songs");
+      addToast(liked ? text("Canción añadida a tus favoritos", "Added to your liked songs") : text("Canción quitada de tus favoritos", "Removed from liked songs"));
       renderPlayerMeta();
     } else if (action === "copy") {
       navigator.clipboard
         ?.writeText(track.youtube_url || `https://www.youtube.com/watch?v=${track.video_id}`)
-        .then(() => addToast("YouTube link copied"))
-        .catch(() => addToast("Could not copy the link", "error"));
+        .then(() => addToast(text("Enlace de YouTube copiado", "YouTube link copied")))
+        .catch(() => addToast(text("No se pudo copiar el enlace", "Could not copy the link"), "error"));
     } else if (action === "youtube") {
       window.open(track.youtube_url || `https://www.youtube.com/watch?v=${track.video_id}`, "_blank", "noopener");
     }
@@ -1023,7 +989,7 @@ function bindPlayer(): void {
   });
   const openNowPlaying = () => {
     if (!player.state.current) {
-      addToast("Pick a song first.");
+      addToast(text("Elige primero una canción.", "Pick a song first."));
       return;
     }
     if (window.innerWidth < 980) setLyricsOpen(true);
@@ -1043,7 +1009,7 @@ function bindPlayer(): void {
     if (track) navigate(`/artist/${track.artist_id}`);
   });
   $("btn-video")?.addEventListener("click", () => {
-    if (!player.state.current) return addToast("Pick a song to watch.");
+    if (!player.state.current) return addToast(text("Elige una canción para ver el video.", "Pick a song to watch."));
     if (player.state.mode === "video") {
       player.setMode("audio");
     } else {
@@ -1058,12 +1024,6 @@ function bindPlayer(): void {
   $("mini-play")?.addEventListener("click", () => player.toggle());
   $("mini-next")?.addEventListener("click", () => void player.next());
   $("mini-art")?.addEventListener("click", openNowPlaying);
-  $("btn-adaptive")?.addEventListener("click", () => {
-    adaptive = !adaptive;
-    localStorage.setItem(ADAPTIVE_KEY, adaptive ? "on" : "off");
-    void refreshAccent();
-    addToast(adaptive ? "Colours now follow the artwork" : "Using Lirify's own palette");
-  });
 
   bindWaveform($("seek"), $("seek-wave"));
   bindWaveform($("t-seek"), $("t-wave"));
@@ -1113,7 +1073,7 @@ function likeButton(liked: boolean, trackId: string): void {
   button?.setAttribute("aria-pressed", String(liked));
   syncLikeButtons(trackId, liked);
   renderPlayerMeta();
-  addToast(liked ? "Added to your liked songs" : "Removed from liked songs");
+  addToast(liked ? text("Canción añadida a tus favoritos", "Added to your liked songs") : text("Canción quitada de tus favoritos", "Removed from liked songs"));
 }
 
 function bindWaveform(container: HTMLElement | null, wave: HTMLElement | null): void {
@@ -1235,8 +1195,15 @@ function bindPanels(): void {
   $("lyrics-offset-minus")?.addEventListener("click", () => lyrics.adjustOffset(-0.25));
   $("lyrics-offset-plus")?.addEventListener("click", () => lyrics.adjustOffset(0.25));
   $("lyrics-follow")?.addEventListener("click", () => lyrics.follow());
+  $("theater-lyrics-follow")?.addEventListener("click", () => lyrics.follow());
   on("lyrics:follow", (following: boolean) => {
-    $("lyrics-follow")?.classList.toggle("is-visible", !following);
+    for (const id of ["lyrics-follow", "theater-lyrics-follow"]) {
+      const button = $(id);
+      if (button) {
+        button.hidden = following;
+        button.classList.toggle("is-visible", !following);
+      }
+    }
   });
 
   $("theater-close")?.addEventListener("click", closeTheater);
@@ -1256,17 +1223,19 @@ function bindPanels(): void {
   $("t-next")?.addEventListener("click", () => void player.next());
 
   $("btn-menu")?.addEventListener("click", () => {
-    document.body.dataset.menu = document.body.dataset.menu === "open" ? "closed" : "open";
-    $("btn-menu")?.setAttribute("aria-expanded", String(document.body.dataset.menu === "open"));
+    setMobileMenu(document.body.dataset.menu !== "open");
   });
-  $("scrim")?.addEventListener("click", closeMobileMenu);
+  $("scrim")?.addEventListener("click", () => {
+    closeMobileMenu();
+    $("btn-menu")?.focus();
+  });
+  mobileNavigation.addEventListener("change", closeMobileMenu);
   $$<HTMLElement>("[data-nav]").forEach((item) => item.addEventListener("click", closeMobileMenu));
   $$<HTMLElement>(".sidebar-playlist").forEach((item) => item.addEventListener("click", closeMobileMenu));
 }
 
 function closeMobileMenu(): void {
-  document.body.dataset.menu = "closed";
-  $("btn-menu")?.setAttribute("aria-expanded", "false");
+  setMobileMenu(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -1294,7 +1263,10 @@ function bindKeyboard(): void {
       if (document.body.dataset.theater === "open") return closeTheater();
       if (document.body.dataset.lyrics === "open" && window.innerWidth < 900) return setLyricsOpen(false);
       if (document.body.dataset.queue === "open") return setQueueOpen(false);
-      if (document.body.dataset.menu === "open") return closeMobileMenu();
+      if (document.body.dataset.menu === "open") {
+        closeMobileMenu();
+        $("btn-menu")?.focus();
+      }
       return;
     }
     if (isTypingTarget(event.target)) return;
@@ -1349,7 +1321,7 @@ function bindKeyboard(): void {
         break;
       case "/":
         event.preventDefault();
-        $<HTMLInputElement>("search-input")?.focus();
+        ($<HTMLInputElement>("course-query") || $<HTMLInputElement>("search-input"))?.focus();
         break;
       default:
         break;
@@ -1370,7 +1342,6 @@ function bindBus(): void {
   on("lyrics:loaded", () => lyrics.tick(true));
   on("bootstrap", (data: Bootstrap) => {
     fillSidebar(data);
-    if (!player.state.current) void refreshAccent(null);
   });
 
   on("track", (track: Track) => {
@@ -1381,7 +1352,6 @@ function bindBus(): void {
     renderTransport();
     renderQueue();
     renderTheater();
-    void refreshAccent(track);
     relatedFor = "";
     if (window.innerWidth >= 1180) {
       // Loading lyrics for the new track is handled by the lyrics controller.
@@ -1424,8 +1394,49 @@ function bindBus(): void {
 // Boot
 // ---------------------------------------------------------------------------
 
+function bindTheme(): void {
+  const root = document.documentElement;
+  const button = $("theme-toggle");
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  const system = matchMedia("(prefers-color-scheme: light)");
+  let manual = false;
+  try {
+    const saved = localStorage.getItem("lirify-theme");
+    manual = saved === "light" || saved === "dark";
+  } catch {}
+
+  function applyTheme(theme: "light" | "dark"): void {
+    root.dataset.theme = theme;
+    button?.setAttribute("aria-pressed", String(theme === "dark"));
+    if (themeColor) themeColor.content = theme === "dark" ? "#171b29" : "#f6f2e9";
+  }
+
+  applyTheme(root.dataset.theme === "light" ? "light" : "dark");
+  button?.addEventListener("click", () => {
+    const theme = root.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme(theme);
+    manual = true;
+    try {
+      localStorage.setItem("lirify-theme", theme);
+    } catch {}
+  });
+  system.addEventListener("change", (event) => {
+    if (!manual) applyTheme(event.matches ? "light" : "dark");
+  });
+  document.querySelector(".skip-link")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    $("view")?.focus();
+  });
+}
+
 function boot(): void {
-  adaptive = localStorage.getItem(ADAPTIVE_KEY) !== "off";
+  bindTheme();
+  const locale = $<HTMLSelectElement>("language-select");
+  locale?.addEventListener("change", () => {
+    location.assign(inLanguage(location.href, locale.value === "en" ? "en" : "es"));
+  });
+  const indexer = $<HTMLAnchorElement>("indexer-link");
+  if (indexer) indexer.href = "#/library";
   document.body.dataset.lyrics = "closed";
   document.body.dataset.queue = "closed";
   document.body.dataset.theater = "closed";
@@ -1441,11 +1452,6 @@ function boot(): void {
   bindSearch();
   bindKeyboard();
   setHistoryNav();
-  if (window.innerWidth < 620) {
-    const searchInput = $<HTMLInputElement>("search-input");
-    if (searchInput) searchInput.placeholder = "Search music or lyrics";
-  }
-
   player.init();
   (window as any).__lirify = { player, lyrics };
   const miniStored = localStorage.getItem(MINI_KEY);
@@ -1454,7 +1460,6 @@ function boot(): void {
 
   renderAllChrome();
   buildWave(player.state.current);
-  void refreshAccent(player.state.current);
   lastRouteName = parseRoute().name;
 
   window.addEventListener("hashchange", onRouteChange);
@@ -1462,22 +1467,11 @@ function boot(): void {
   onRouteChange();
 
   getBootstrap()
-    .then((data) => {
-      fillSidebar(data);
-      if (!player.state.current) void refreshAccent(null);
-    })
-    .catch((error) => {
-      addToast(`The indexing API is unreachable at ${location.hostname}:8000`, "error");
-      const root = $("view");
-      if (root) {
-        root.innerHTML = `<div class="error-state">
-          <span class="glyph">${iconMarkup("wave", "", 26)}</span>
-          <h3>Waiting for the Lirify API</h3>
-          <p>${escapeHtml(String(error.message || error))}</p>
-          <p class="muted">Start it with <code>docker compose up -d api</code>, then reload.</p>
-          <button class="btn btn-ghost btn-sm" onclick="location.reload()">Reload</button>
-        </div>`;
-      }
+    .then(fillSidebar)
+    .catch(() => {
+      const label = $("index-title");
+      if (label) label.textContent = text("Catálogo no disponible", "Catalogue unavailable");
+      $("sidebar-playlists")?.replaceChildren();
     });
 
   window.addEventListener("pagehide", () => player.persistPosition());

@@ -1,4 +1,6 @@
 ---
+import { LANGUAGE_COOKIE, resolveLanguage, translator } from "../lib/locale";
+const text = translator(resolveLanguage(Astro.url, Astro.cookies.get(LANGUAGE_COOKIE)?.value));
 import Icon from "./Icon.astro";
 ---
 
@@ -9,17 +11,17 @@ import Icon from "./Icon.astro";
     </button>
     <div>
       <div class="title" id="theater-title">Theater</div>
-      <div class="sub" id="theater-artist">Nothing playing</div>
+      <div class="sub" id="theater-artist">{text("Nada en reproducción", "Nothing playing")}</div>
     </div>
     <span class="spacer"></span>
-    <button class="icon-btn tiny" id="theater-lyrics-toggle" aria-label="Toggle lyrics" aria-pressed="true">
+    <button class="icon-btn tiny" id="theater-lyrics-toggle" aria-label={text("Mostrar u ocultar letra", "Toggle lyrics")} aria-pressed="true">
       <Icon name="mic" size={16} />
     </button>
     <button class="btn btn-outline btn-sm" id="theater-mode" aria-label="Toggle video">
       <Icon name="video" size={15} />
-      <span id="theater-mode-label">Watch video</span>
+      <span id="theater-mode-label">{text("Ver video", "Watch video")}</span>
     </button>
-    <a class="icon-btn round" id="theater-open-yt" href="#" target="_blank" rel="noreferrer" aria-label="Open on YouTube">
+    <a class="icon-btn round" id="theater-open-yt" href="#" target="_blank" rel="noreferrer" aria-label={text("Abrir en YouTube", "Open on YouTube")}>
       <Icon name="external" size={16} />
     </a>
   </header>
@@ -38,16 +40,17 @@ import Icon from "./Icon.astro";
 
     <aside class="theater-side">
       <div class="theater-side-head">
-        <h3>Lyrics</h3>
-        <p>Synced to the playback clock</p>
+        <h3>{text("Letra", "Lyrics")}</h3>
+        <p id="theater-lyrics-sync" role="status">{text("Reproduce una canción", "Play a song")}</p>
       </div>
       <div class="theater-lyrics-body" id="theater-lyrics-body">
         <div class="lyrics-lines" id="theater-lyrics"></div>
-        <div class="lyrics-empty" id="theater-lyrics-empty" hidden>
+        <div class="lyrics-empty" id="theater-lyrics-empty" role="status">
           <Icon name="mic" size={30} />
-          <p data-empty-text>Lyrics will appear when a track is playing.</p>
+          <p data-empty-text>{text("Reproduce una canción para ver su letra.", "Play a song to see its lyrics.")}</p>
         </div>
       </div>
+      <button class="btn btn-primary lyrics-follow" type="button" id="theater-lyrics-follow" hidden>{text("Seguir la letra", "Follow lyrics")}</button>
     </aside>
   </div>
 
@@ -55,7 +58,7 @@ import Icon from "./Icon.astro";
     <div class="theater-info">
       <img class="art" id="theater-art" alt="" hidden />
       <div class="meta">
-        <b id="theater-track">Nothing playing</b>
+        <b id="theater-track">{text("Nada en reproducción", "Nothing playing")}</b>
         <span id="theater-track-artist"></span>
       </div>
     </div>
@@ -63,7 +66,7 @@ import Icon from "./Icon.astro";
       <button class="icon-btn" id="t-prev" aria-label="Previous">
         <Icon name="skip-back" size={18} />
       </button>
-      <button class="btn-play" id="t-play" aria-label="Play">
+      <button class="btn-play" id="t-play" aria-label={text("Reproducir", "Play")}>
         <svg class="icon-play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M8 5.15v13.7a1 1 0 0 0 1.53.85l10.6-6.85a1 1 0 0 0 0-1.7L9.53 4.3A1 1 0 0 0 8 5.15Z"></path>
         </svg>
@@ -75,7 +78,7 @@ import Icon from "./Icon.astro";
       <button class="icon-btn" id="t-next" aria-label="Next">
         <Icon name="skip-forward" size={18} />
       </button>
-      <div class="seek" id="t-seek" role="slider" tabindex="0" aria-label="Seek">
+      <div class="seek" id="t-seek" role="slider" tabindex="0" aria-label={text("Avanzar en la canción", "Seek")}>
         <span class="time is-current" id="t-current">0:00</span>
         <div class="wave" id="t-wave">
           <div class="wave-bars" id="t-wave-base"></div>
