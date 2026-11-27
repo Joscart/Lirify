@@ -119,6 +119,10 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 - Only songs with non-empty lyrics are committed. **Any language is indexable**;
   language detection is metadata only and unsupported languages fall back to a
   generic tokenizer instead of being dropped.
+- `core.detectar_idiomas()` runs per line: `songs.language` keeps the primary
+  ISO code and `songs.languages` stores every detected language (ordered, unique,
+  ISO-639-1) in Atlas. Lines shorter than 3 words or below
+  `LANGUAGE_MIN_CONFIDENCE` (0.65) are ignored to avoid false positives.
 - Duplicates are skipped per `video_id` inside `core.indexar_canciones`.
 - `core.publicar()` writes songs to Atlas and LLM embeddings to Qdrant, then bumps
   `index_stats.revision`. It is the only bulk cloud write path; the local admin
@@ -160,10 +164,12 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   (`QDRANT_COLLECTION`) plus a publish backfill. Never point 1024-dim vectors at
   the old 256-dim `lirify_lyrics`.
 - `local_indexer` is heavy on first run (torch + model download). The image
-  defaults to **CPU torch** because this host has no NVIDIA container runtime;
-  build with `--build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124`
-  after configuring nvidia-container-toolkit. Keep the `hf_cache` volume;
-  deleting it forces a full re-download.
+  defaults to **CPU torch**; GPU indexing needs the privileged toolkit setup
+  (`nvidia-container-toolkit`, `nvidia-ctk runtime configure`), then:
+  `docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml -f docker-compose.gpu.yml up -d --build local-indexer`.
+  That overlay builds CUDA 13.2 torch and sets `EMBEDDING_DEVICE=cuda`,
+  float16 and batch 8. Keep the `hf_cache` volume; deleting it forces a full
+  re-download.
 - `data/` is legacy and unmounted. Do not reintroduce file I/O in the cloud API.
 - `services/api/app/qwen_tokenizer.py` is no longer imported by any service; it is
   kept only because it carries uncommitted user edits.

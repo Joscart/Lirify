@@ -26,7 +26,8 @@ const Song = mongoose.model("Song", new mongoose.Schema({
   title:         { type: String, required: true },   // normalised track title
   youtubeTitle:  { type: String, default: "" },
   artist:        { type: String, default: "" },
-  language:      { type: String, required: true },   // best-effort label; any language indexed
+  language:      { type: String, required: true },   // primary label; any language indexed
+  languages:     { type: [String], default: [] },    // every language detected line by line
   lyrics:        { type: String, required: true },
   backend:       { type: String, default: "" },      // lyrics provider that resolved it
   duration:      { type: Number, default: null },
@@ -140,6 +141,7 @@ transient. An M0 cluster is comfortably large for several thousand tracks.
   "inverted_terms": 18234,
   "lyrics_tokens": 138294,
   "languages": {"en": 377, "es": 35},
+  "detected_languages": {"en": 390, "es": 48, "fr": 6},
   "backends": {"limusic": 260, "boidu": 152},
   "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
   "embedding_dim": 1024,

@@ -246,6 +246,7 @@ class Pipeline:
                     "title": documento.get("title") or "",
                     "artist": documento.get("artist") or "",
                     "language": documento.get("language") or "",
+                    "languages": list(documento.get("languages") or []),
                     "lyrics": letra,
                     "backend": documento.get("backend") or "",
                 }
@@ -307,6 +308,7 @@ class Pipeline:
                     "title": self.indexer.titulos[i],
                     "artist": self.indexer.artistas[i],
                     "language": self.indexer.idiomas[i],
+                    "languages": list(self.indexer.idiomas_detectados[i]),
                     "lyrics": self.indexer.letras[i],
                     "backend": self.indexer.backends[i],
                 }
@@ -324,6 +326,7 @@ class Pipeline:
                 "title": self.indexer.titulos[i],
                 "artist": self.indexer.artistas[i],
                 "language": self.indexer.idiomas[i],
+                "languages": list(self.indexer.idiomas_detectados[i]),
                 "lyrics": self.indexer.letras[i],
                 "backend": self.indexer.backends[i],
             }

@@ -61,6 +61,10 @@ def _cancion_de_documento(doc: dict[str, Any]) -> dict[str, Any]:
         "track": doc.get("title", ""),
         "artist": doc.get("artist", ""),
         "language": doc.get("language", ""),
+        "languages": list(
+            doc.get("languages")
+            or ([doc.get("language")] if doc.get("language") else [])
+        ),
         "lyrics": doc.get("lyrics", ""),
         "backend": doc.get("backend", ""),
         "duration": doc.get("duration"),
@@ -77,6 +81,10 @@ def _documento_de_cancion(cancion: dict[str, Any]) -> dict[str, Any]:
         "youtubeTitle": cancion["title"],
         "artist": cancion["artist"],
         "language": cancion["language"],
+        "languages": list(
+            cancion.get("languages")
+            or ([cancion["language"]] if cancion.get("language") else [])
+        ),
         "lyrics": cancion["lyrics"],
         "backend": cancion["backend"],
         "duration": cancion["duration"],
@@ -105,12 +113,18 @@ def _normalizar(payload: dict[str, Any], video_id: str | None = None) -> dict[st
     except (TypeError, ValueError):
         duracion = None
 
+    idiomas = payload.get("languages") or payload.get("idiomas_detectados") or []
+    if isinstance(idiomas, str):
+        idiomas = idiomas.split(",")
+    languages = [str(idioma).strip() for idioma in idiomas if str(idioma).strip()]
+
     return {
         "video_id": video,
         "title": titulo or track,
         "track": track,
         "artist": str(payload.get("artist") or "").strip(),
         "language": str(payload.get("language") or "unknown").strip() or "unknown",
+        "languages": languages,
         "lyrics": letra,
         "backend": str(payload.get("backend") or "manual").strip() or "manual",
         "duration": duracion,
@@ -120,6 +134,26 @@ def _normalizar(payload: dict[str, Any], video_id: str | None = None) -> dict[st
 class DbAdmin:
     def __init__(self, pipeline: Any) -> None:
         self.pipeline = pipeline
+
+    def _normalizar_cancion(
+        self, payload: dict[str, Any], video_id: str | None = None
+    ) -> dict[str, Any]:
+        cancion = _normalizar(payload, video_id=video_id)
+        self._completar_idiomas(cancion)
+        return cancion
+
+    def _completar_idiomas(self, cancion: dict[str, Any]) -> None:
+        with self.pipeline._lock:
+            if not cancion["languages"]:
+                cancion["languages"] = self.pipeline.indexer.detectar_idiomas(
+                    cancion["lyrics"]
+                )
+        if (
+            cancion["language"]
+            and cancion["language"] != "unknown"
+            and cancion["language"] not in cancion["languages"]
+        ):
+            cancion["languages"].insert(0, cancion["language"])
 
     # ------------------------------------------------------------------
     # Backends
@@ -210,6 +244,8 @@ class DbAdmin:
             "embedding": {
                 "model": indice.modelo_id,
                 "dim": indice.dimension_embeddings,
+                "device": indice.dispositivo_embeddings(),
+                "batch_size": int(os.environ.get("EMBEDDING_BATCH_SIZE", "8")),
             },
             "index": {
                 "songs": len(indice.docs_id),
@@ -265,7 +301,7 @@ class DbAdmin:
         return _cancion_de_documento(doc)
 
     def crear_cancion(self, payload: dict[str, Any]) -> dict[str, Any]:
-        cancion = _normalizar(payload)
+        cancion = self._normalizar_cancion(payload)
         documento = _documento_de_cancion(cancion)
         cliente, base = self._mongo()
         try:
@@ -284,7 +320,7 @@ class DbAdmin:
     def actualizar_cancion(
         self, video_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        cancion = _normalizar(payload, video_id=video_id)
+        cancion = self._normalizar_cancion(payload, video_id=video_id)
         documento = _documento_de_cancion(cancion)
         cliente, base = self._mongo()
         try:

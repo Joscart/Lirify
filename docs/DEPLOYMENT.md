@@ -343,13 +343,23 @@ The model is `Qwen/Qwen3-Embedding-0.6B` (~1.2 GB) and is cached in the
 `hf_cache` volume on first start. Deleting that volume forces a re-download.
 
 The image installs **CPU torch** by default so it builds on hosts without the
-NVIDIA container runtime. After configuring nvidia-container-toolkit (and
-adding the `deploy.resources` block back), build the CUDA variant:
+NVIDIA container runtime. For GPU indexing, install the toolkit (privileged,
+run it yourself), then use the GPU overlay:
 
 ```bash
-docker build -f services/local-indexer/Dockerfile \
-  --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124 .
+sudo pacman -S --needed nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+
+docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml \
+  -f docker-compose.gpu.yml up -d --build local-indexer
 ```
+
+The overlay builds CUDA 13.2 torch (`TORCH_INDEX_URL=.../cu132`), sets
+`EMBEDDING_DEVICE=cuda`, `EMBEDDING_DTYPE=float16`, `EMBEDDING_BATCH_SIZE=8`
+and adds the NVIDIA device reservation. `core.py` truncates each text to
+`EMBEDDING_MAX_CHARS` (6000) to keep the 4 GB card within budget.
 
 ### 10.2 Start local-indexer + local-ui
 

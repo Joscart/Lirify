@@ -23,6 +23,8 @@ services:
     build:
       context: .
       dockerfile: services/local-indexer/Dockerfile
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
     container_name: lirify-local-indexer
     env_file:
       - .env
@@ -34,6 +36,10 @@ services:
       PUBLISH_ON_INDEX: "1"
       LOAD_ON_START: "1"
       ADMIN_PORT: "8080"
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-8}
+      EMBEDDING_DTYPE: ${EMBEDDING_DTYPE:-float16}
+      EMBEDDING_MAX_CHARS: ${EMBEDDING_MAX_CHARS:-6000}
     volumes:
       - hf_cache:/root/.cache/huggingface
     ports:

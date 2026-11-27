@@ -49,7 +49,7 @@ class FakePipeline:
 class _FakeModel:
     dim = 8
 
-    def encode(self, texts, convert_to_numpy=True):
+    def encode(self, texts, convert_to_numpy=True, **kwargs):
         import numpy as np
 
         if isinstance(texts, str):
@@ -252,6 +252,22 @@ class DbAdminTests(unittest.TestCase):
         self.assertEqual(
             self.pipeline.indexer.buscar("verano", 1)["results"][0]["video_id"],
             "aaaaaaaaaaa",
+        )
+
+    def test_create_records_all_detected_languages(self):
+        cancion = self.admin.crear_cancion(
+            {
+                "video_id": "ddddddddddd",
+                "title": "Mixta",
+                "artist": "Sur",
+                "language": "es",
+                "lyrics": "el amor de verano\nwinter love is cold",
+            }
+        )
+        self.assertEqual(cancion["languages"], ["es", "en"])
+        self.assertEqual(
+            self.mongo.database["songs"].docs["ddddddddddd"]["languages"],
+            ["es", "en"],
         )
 
     def test_create_duplicate_is_conflict(self):

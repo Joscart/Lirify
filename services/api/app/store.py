@@ -358,6 +358,7 @@ class MongoStore(Store):
                     "title": doc.get("youtubeTitle", "") or doc.get("title", ""),
                     "artist": doc.get("artist", ""),
                     "language": doc.get("language", ""),
+                    "languages": list(doc.get("languages") or []),
                     "lyrics": doc.get("lyrics", ""),
                     "backend": doc.get("backend", ""),
                     "duration": doc.get("duration"),

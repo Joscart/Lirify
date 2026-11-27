@@ -103,6 +103,8 @@ def migrate(data_dir: Path, dry_run: bool, limit: Optional[int]) -> Dict[str, in
                             "youtubeTitle": song.get("youtube_title") or song.get("title") or "",
                             "artist": song.get("artist") or "",
                             "language": song.get("language") or "unknown",
+                            "languages": list(song.get("languages") or [])
+                            or [song.get("language") or "unknown"],
                             "lyrics": song.get("lyrics") or "",
                             "backend": song.get("backend") or "",
                             "schemaVersion": SCHEMA_VERSION,

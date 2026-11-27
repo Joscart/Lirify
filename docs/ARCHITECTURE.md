@@ -165,6 +165,9 @@ player API. Index routes answer `403`. `go-webui` exposes `/api/stats`,
 
 - The index is accumulative: jobs add tracks, they never reset the library.
 - A track is committed only with non-empty lyrics; any language is indexable.
+  `core.detectar_idiomas()` scans the lyrics line by line and Atlas stores both
+  the primary ISO code (`language`) and the ordered unique list
+  (`languages`).
 - Duplicates are skipped per `video_id`.
 - Only LLM embeddings are published to the cloud; matrices stay in the local
   process.

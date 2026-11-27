@@ -113,6 +113,16 @@ The indexer reads `MONGODB_URI`, `QDRANT_URL` and `QDRANT_API_KEY` from `.env`,
 hydrates committed songs from Atlas at startup, and publishes after every
 committed playlist (`PUBLISH_ON_INDEX=1`).
 
+For GPU indexing, add the GPU overlay after configuring nvidia-container-toolkit:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml \
+  -f docker-compose.gpu.yml up -d --build local-indexer
+```
+
+`core.py` picks CUDA automatically (`EMBEDDING_DEVICE=auto`), uses float16 and
+`EMBEDDING_BATCH_SIZE=8` on the 4 GB RTX 2050.
+
 The **Databases** panel in `local-ui` gives full CRUD over both stores:
 
 - Mongo songs: list/filter, create, edit, delete.

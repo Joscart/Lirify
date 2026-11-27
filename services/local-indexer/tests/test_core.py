@@ -18,22 +18,35 @@ def _install_stubs():
     if "lingua" not in sys.modules:
         lingua = types.ModuleType("lingua")
 
+        class _Iso:
+            def __init__(self, code):
+                self.name = code
+
         class _Language:
-            def __init__(self, name):
+            def __init__(self, name, code):
                 self.name = name
+                self.iso_code_639_1 = _Iso(code)
+
+        class _Confidence:
+            def __init__(self, language, value):
+                self.language = language
+                self.value = value
 
         class _Detector:
+            def compute_language_confidence_values(self, text):
+                return [_Confidence(self.detect_language_of(text), 0.95)]
+
             def detect_language_of(self, text):
                 low = text.lower()
                 if re.search(r"\b(los|las|la|el|de|y|que|con)\b", low):
-                    return _Language("SPANISH")
+                    return _Language("SPANISH", "ES")
                 if re.search(r"\b(der|die|das|und|den)\b", low):
-                    return _Language("GERMAN")
+                    return _Language("GERMAN", "DE")
                 if re.search(r"\b(le|les|des|et|une|pour)\b", low):
-                    return _Language("FRENCH")
+                    return _Language("FRENCH", "FR")
                 if re.search(r"\b(i|w|z|na|się|jest)\b", low):
-                    return _Language("POLISH")
-                return _Language("ENGLISH")
+                    return _Language("POLISH", "PL")
+                return _Language("ENGLISH", "EN")
 
         class _Builder:
             @classmethod
@@ -50,11 +63,12 @@ def _install_stubs():
         st = types.ModuleType("sentence_transformers")
 
         class SentenceTransformer:
-            def __init__(self, name):
+            def __init__(self, name, **kwargs):
                 self.name = name
+                self.kwargs = kwargs
                 self.dim = 64
 
-            def encode(self, texts, convert_to_numpy=True):
+            def encode(self, texts, convert_to_numpy=True, **kwargs):
                 if isinstance(texts, str):
                     texts = [texts]
                 out = np.zeros((len(texts), self.dim), dtype=np.float32)
@@ -125,6 +139,29 @@ class PipelineTests(unittest.TestCase):
     def test_empty_text_is_ignored(self):
         self.assertIsNone(self.indexer.procesar_texto(""))
         self.assertIsNone(self.indexer.agregar_documento(""))
+
+    def test_all_line_languages_are_recorded(self):
+        id_documento = self.indexer.agregar_documento(
+            "el amor de verano\nwinter love is cold\nla playa y el sol",
+            video_id="ddddddddddd",
+            idioma="es",
+        )
+        self.assertEqual(self.indexer.idiomas_detectados[id_documento], ["es", "en"])
+
+    def test_mongo_document_carries_every_detected_language(self):
+        cancion = {
+            "video_id": "ddddddddddd",
+            "track": "Mixta",
+            "artist": "Sur",
+            "language": "es",
+            "lyrics": "el amor de verano\nwinter love is cold",
+            "backend": "manual",
+        }
+        self.indexer.indexar_canciones([cancion])
+        documento = self.indexer._documentos_mongo()[0]
+        self.assertEqual(documento["language"], "es")
+        self.assertEqual(documento["languages"], ["es", "en"])
+        self.assertEqual(cancion["languages"], ["es", "en"])
 
     def test_metadata_is_stored(self):
         self.indexer.indexar_canciones(DOCS)
@@ -259,6 +296,14 @@ class SerializationTests(unittest.TestCase):
         self.assertIsNotNone(restored.matriz_embeddings_llm)
         result = restored.buscar("winter snow", limite=3)
         self.assertEqual(result["results"][0]["video_id"], "bbbbbbbbbbb")
+
+    def test_roundtrip_keeps_detected_languages(self):
+        payload = self.indexer.a_diccionario()
+        first = payload["documentos"][0]
+        self.assertEqual(first["idiomas_detectados"], ["es"])
+        restored = make_indexer()
+        restored.desde_diccionario(payload)
+        self.assertEqual(restored.idiomas_detectados[0], ["es"])
 
     def test_roundtrip_without_embeddings(self):
         payload = self.indexer.a_diccionario(incluir_embeddings=False)

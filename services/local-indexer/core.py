@@ -35,6 +35,12 @@ _ETIQUETA_LRC_RE = re.compile(r"^\[[A-Za-z]+:.*?\]$", re.MULTILINE)
 _MARCA_TIEMPO_RE = re.compile(r"\[\d{1,2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?\]")
 _ETIQUETA_RE = re.compile(r"<[^>]+>")
 
+CONFIANZA_MINIMA = float(os.environ.get("LANGUAGE_MIN_CONFIDENCE", "0.65"))
+EMBEDDING_DEVICE = (os.environ.get("EMBEDDING_DEVICE") or "auto").strip().lower()
+EMBEDDING_DTYPE = (os.environ.get("EMBEDDING_DTYPE") or "float16").strip().lower()
+EMBEDDING_BATCH = int(os.environ.get("EMBEDDING_BATCH_SIZE", "8"))
+EMBEDDING_MAX_CHARS = int(os.environ.get("EMBEDDING_MAX_CHARS", "6000"))
+
 _NAMESPACE_PUNTOS = uuid.UUID("6f0a1f4e-7c2b-5c6d-9f10-1b2c3d4e5f60")
 
 
@@ -88,6 +94,7 @@ class Indexer:
         self.titulos: list[str] = []
         self.artistas: list[str] = []
         self.idiomas: list[str] = []
+        self.idiomas_detectados: list[list[str]] = []
         self.backends: list[str] = []
         self.letras: list[str] = []
 
@@ -103,6 +110,7 @@ class Indexer:
             or "Qwen/Qwen3-Embedding-0.6B"
         ).strip()
         self.modelo_embeddings = modelo_embeddings
+        self.embedding_device = "unknown"
         self.matriz_embeddings_llm: np.ndarray | None = None
         self.dimension_embeddings = int(
             dimension_embeddings or os.environ.get("EMBEDDING_DIM", "1024") or 1024
@@ -113,9 +121,59 @@ class Indexer:
     # ------------------------------------------------------------------
     # Inicialización
     # ------------------------------------------------------------------
+    def dispositivo_embeddings(self) -> str:
+        pedido = EMBEDDING_DEVICE
+        if pedido in {"cpu", "cuda"}:
+            if pedido == "cuda":
+                try:
+                    import torch
+
+                    if not torch.cuda.is_available():
+                        print(
+                            "[lirify] EMBEDDING_DEVICE=cuda but CUDA is unavailable; "
+                            "falling back to CPU",
+                            flush=True,
+                        )
+                        return "cpu"
+                except ImportError:
+                    print(
+                        "[lirify] torch is missing; falling back to CPU embeddings",
+                        flush=True,
+                    )
+                    return "cpu"
+            return pedido
+        try:
+            import torch
+
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            return "cpu"
+
     def inicializar_modelo_embeddings(self) -> Any:
         if self.modelo_embeddings is None:
-            self.modelo_embeddings = SentenceTransformer(self.modelo_id)
+            dispositivo = self.dispositivo_embeddings()
+            opciones: dict[str, Any] = {"device": dispositivo}
+            if dispositivo == "cuda" and EMBEDDING_DTYPE in {"float16", "half"}:
+                try:
+                    import torch
+
+                    opciones["model_kwargs"] = {"torch_dtype": torch.float16}
+                except ImportError:
+                    pass
+            self.modelo_embeddings = SentenceTransformer(self.modelo_id, **opciones)
+            self.embedding_device = dispositivo
+            if dispositivo == "cpu":
+                try:
+                    import torch
+
+                    torch.set_num_threads(max(1, os.cpu_count() or 1))
+                except ImportError:
+                    pass
+            print(
+                f"[lirify] embeddings on {dispositivo} "
+                f"(batch={EMBEDDING_BATCH}, dtype={EMBEDDING_DTYPE if dispositivo == 'cuda' else 'float32'})",
+                flush=True,
+            )
         return self.modelo_embeddings
 
     def inicializar_stopwords(self) -> None:
@@ -157,6 +215,7 @@ class Indexer:
             self.titulos.append("")
             self.artistas.append("")
             self.idiomas.append("")
+            self.idiomas_detectados.append([])
             self.backends.append("")
             self.letras.append("")
 
@@ -199,6 +258,11 @@ class Indexer:
                     "titulo": self.titulos[i] if i < len(self.titulos) else "",
                     "artista": self.artistas[i] if i < len(self.artistas) else "",
                     "idioma": self.idiomas[i] if i < len(self.idiomas) else "",
+                    "idiomas_detectados": list(
+                        self.idiomas_detectados[i]
+                        if i < len(self.idiomas_detectados)
+                        else []
+                    ),
                     "backend": self.backends[i] if i < len(self.backends) else "",
                     "letra": self.letras[i] if i < len(self.letras) else "",
                 }
@@ -223,6 +287,7 @@ class Indexer:
         self.titulos = []
         self.artistas = []
         self.idiomas = []
+        self.idiomas_detectados = []
         self.backends = []
         self.letras = []
 
@@ -233,6 +298,8 @@ class Indexer:
                 titulo=documento.get("titulo") or documento.get("title") or "",
                 artista=documento.get("artista") or documento.get("artist") or "",
                 idioma=documento.get("idioma") or documento.get("language") or "",
+                languages=documento.get("idiomas_detectados")
+                or documento.get("languages"),
                 backend=documento.get("backend") or "",
             )
 
@@ -262,6 +329,43 @@ class Indexer:
             return None
         idioma_detectado = self.language_detector.detect_language_of(texto)
         return idioma_detectado.name.lower() if idioma_detectado else None
+
+    def detectar_idiomas(self, texto: str, minimo: int = 8) -> list[str]:
+        """Every language detected line by line, in first-appearance order.
+
+        Short or metadata-only lines are skipped (timestamps, ``[ar:...]`` tags),
+        and the primary language of the song is usually the first entry.
+        """
+        detectados: list[str] = []
+        for linea in (texto or "").splitlines():
+            limpia = _MARCA_TIEMPO_RE.sub(" ", linea)
+            limpia = _ETIQUETA_LRC_RE.sub(" ", limpia).strip()
+            if len(limpia) < minimo or len(_PALABRAS_RE.findall(limpia)) < 3:
+                continue
+
+            try:
+                valores = self.language_detector.compute_language_confidence_values(
+                    limpia
+                )
+            except AttributeError:
+                valores = []
+            if valores:
+                mejor = valores[0]
+                if float(getattr(mejor, "value", 0.0)) < CONFIANZA_MINIMA:
+                    continue
+                deteccion = getattr(mejor, "language", None)
+            else:
+                deteccion = self.language_detector.detect_language_of(limpia)
+            if deteccion is None:
+                continue
+
+            try:
+                codigo = deteccion.iso_code_639_1.name.lower()
+            except (AttributeError, ValueError):
+                codigo = deteccion.name.lower()
+            if codigo and codigo not in detectados:
+                detectados.append(codigo)
+        return detectados
 
     def normalizar_texto(self, texto: str, idioma: str | None) -> str | None:
         if not texto:
@@ -349,6 +453,7 @@ class Indexer:
         artista: str = "",
         idioma: str = "",
         backend: str = "",
+        languages: Iterable[str] | None = None,
     ) -> int | None:
         if not texto:
             return None
@@ -364,6 +469,10 @@ class Indexer:
         self.titulos[id_documento] = titulo
         self.artistas[id_documento] = artista
         self.idiomas[id_documento] = idioma
+        detectados = list(languages) if languages else self.detectar_idiomas(texto)
+        if idioma and idioma != "unknown" and idioma not in detectados:
+            detectados.insert(0, idioma)
+        self.idiomas_detectados[id_documento] = detectados
         self.backends[id_documento] = backend
         self.letras[id_documento] = texto
 
@@ -379,7 +488,7 @@ class Indexer:
     def agregar_cancion(self, cancion: dict[str, Any]) -> int | None:
         video_id = str(cancion.get("video_id") or cancion.get("videoId") or "")
         letra = str(cancion.get("lyrics") or cancion.get("letra") or "")
-        return self.agregar_documento(
+        id_documento = self.agregar_documento(
             letra,
             video_id=video_id,
             titulo=str(
@@ -391,7 +500,11 @@ class Indexer:
             artista=str(cancion.get("artist") or cancion.get("artista") or ""),
             idioma=str(cancion.get("language") or cancion.get("idioma") or ""),
             backend=str(cancion.get("backend") or ""),
+            languages=cancion.get("languages") or cancion.get("idiomas_detectados"),
         )
+        if id_documento is not None:
+            cancion["languages"] = list(self.idiomas_detectados[id_documento])
+        return id_documento
 
     def indexar_canciones(
         self, canciones: Iterable[dict[str, Any]], calcular_embeddings: bool = True
@@ -454,7 +567,14 @@ class Indexer:
             cancion.get("track") or cancion.get("title") or ""
         )
         self.artistas[id_documento] = str(cancion.get("artist") or "")
-        self.idiomas[id_documento] = str(cancion.get("language") or "")
+        idioma = str(cancion.get("language") or "")
+        self.idiomas[id_documento] = idioma
+        detectados = list(
+            cancion.get("languages") or cancion.get("idiomas_detectados") or []
+        ) or self.detectar_idiomas(letra)
+        if idioma and idioma != "unknown" and idioma not in detectados:
+            detectados.insert(0, idioma)
+        self.idiomas_detectados[id_documento] = detectados
         self.backends[id_documento] = str(cancion.get("backend") or "")
         self.letras[id_documento] = letra
 
@@ -483,6 +603,7 @@ class Indexer:
                 self.titulos,
                 self.artistas,
                 self.idiomas,
+                self.idiomas_detectados,
                 self.backends,
                 self.letras,
             ):
@@ -495,6 +616,7 @@ class Indexer:
             self.titulos,
             self.artistas,
             self.idiomas,
+            self.idiomas_detectados,
             self.backends,
             self.letras,
         ):
@@ -519,6 +641,7 @@ class Indexer:
         self.titulos = []
         self.artistas = []
         self.idiomas = []
+        self.idiomas_detectados = []
         self.backends = []
         self.letras = []
         self.matriz_embeddings_llm = None
@@ -595,14 +718,22 @@ class Indexer:
             self.reconstruir_documento(id_documento)
         )
 
+    def _recortar(self, texto: str) -> str:
+        return (texto or "")[:EMBEDDING_MAX_CHARS]
+
     def _codificar(self, textos: Sequence[str]) -> np.ndarray:
         modelo = self.inicializar_modelo_embeddings()
-        vectores = modelo.encode(list(textos), convert_to_numpy=True)
+        vectores = modelo.encode(
+            [self._recortar(texto) for texto in textos],
+            batch_size=max(1, EMBEDDING_BATCH),
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
         matriz = np.asarray(vectores, dtype=np.float32)
         return matriz.reshape(len(textos), -1)
 
     def embedding_de_texto(self, texto: str) -> list[float]:
-        vector = self._codificar([limpiar_letra(texto) or texto])[0]
+        vector = self._codificar([self._recortar(limpiar_letra(texto) or texto)])[0]
         self.dimension_embeddings = int(vector.shape[0])
         return vector.astype(float).tolist()
 
@@ -776,10 +907,14 @@ class Indexer:
 
     def estadisticas(self) -> dict[str, Any]:
         idiomas: dict[str, int] = {}
+        detectados: dict[str, int] = {}
         backends: dict[str, int] = {}
         for i in sorted(self.docs_id):
             if i < len(self.idiomas) and self.idiomas[i]:
                 idiomas[self.idiomas[i]] = idiomas.get(self.idiomas[i], 0) + 1
+            if i < len(self.idiomas_detectados):
+                for idioma in self.idiomas_detectados[i]:
+                    detectados[idioma] = detectados.get(idioma, 0) + 1
             if i < len(self.backends) and self.backends[i]:
                 backends[self.backends[i]] = backends.get(self.backends[i], 0) + 1
         tokens = sum(
@@ -794,10 +929,13 @@ class Indexer:
             "inverted_terms": len(self.inverted_index),
             "lyrics_tokens": tokens,
             "languages": idiomas,
+            "detected_languages": detectados,
             "backends": backends,
             "embedding_model": self.modelo_id,
             "embedding_dim": self.dimension_embeddings,
             "embedding_provider": "sentence-transformers",
+            "embedding_device": self.embedding_device,
+            "embedding_batch_size": EMBEDDING_BATCH,
             "state": self.STATES.get(self.state, ""),
         }
 
@@ -822,6 +960,11 @@ class Indexer:
             "youtubeTitle": str(cancion.get("title") or cancion.get("track") or ""),
             "artist": str(cancion.get("artist") or ""),
             "language": str(cancion.get("language") or ""),
+            "languages": list(
+                cancion.get("languages")
+                or cancion.get("idiomas_detectados")
+                or ([cancion.get("language")] if cancion.get("language") else [])
+            ),
             "lyrics": letra,
             "backend": str(cancion.get("backend") or ""),
             "schemaVersion": 1,
@@ -838,6 +981,11 @@ class Indexer:
                     "track": self.titulos[i] if i < len(self.titulos) else "",
                     "artist": self.artistas[i] if i < len(self.artistas) else "",
                     "language": self.idiomas[i] if i < len(self.idiomas) else "",
+                    "languages": list(
+                        self.idiomas_detectados[i]
+                        if i < len(self.idiomas_detectados)
+                        else []
+                    ),
                     "lyrics": self.letras[i] if i < len(self.letras) else "",
                     "backend": self.backends[i] if i < len(self.backends) else "",
                 }

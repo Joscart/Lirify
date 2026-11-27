@@ -20,6 +20,11 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
 docker volume inspect "$VOLUME" >/dev/null 2>&1 || docker volume create "$VOLUME" >/dev/null
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 
+GPU_ARGS=()
+if [[ "${GPU:-0}" == "1" ]]; then
+  GPU_ARGS+=(--gpus all)
+fi
+
 docker run -d --name "$NAME" \
   --env-file "$ROOT/.env" \
   -e GRPC_PORT=50051 \
@@ -29,6 +34,10 @@ docker run -d --name "$NAME" \
   -e QDRANT_COLLECTION="${QDRANT_COLLECTION:-lirify_lyrics_qwen3}" \
   -e PUBLISH_ON_INDEX="${PUBLISH_ON_INDEX:-1}" \
   -e LOAD_ON_START="${LOAD_ON_START:-0}" \
+  -e EMBEDDING_DEVICE="${EMBEDDING_DEVICE:-auto}" \
+  -e EMBEDDING_BATCH_SIZE="${EMBEDDING_BATCH_SIZE:-8}" \
+  -e EMBEDDING_DTYPE="${EMBEDDING_DTYPE:-float16}" \
+  "${GPU_ARGS[@]}" \
   -p "127.0.0.1:${PORT_GRPC}:50051" \
   -p "127.0.0.1:${PORT_ADMIN}:8080" \
   -v "$ROOT/services/local-indexer:/app" \
