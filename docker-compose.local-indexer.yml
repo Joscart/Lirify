@@ -9,6 +9,16 @@
 # It never calls the cloud API, and the cloud API never calls it.
 # ---------------------------------------------------------------------------
 services:
+  api:
+    # Web search sends the query to the indexer's Qwen3-Embedding-0.6B endpoint,
+    # so queries live in the same vector space as the indexed lyrics.
+    # For the standalone dev container (scripts/local/run_indexer_dev.sh) set
+    # QUERY_EMBED_URL=http://host.docker.internal:8082 in .env instead.
+    environment:
+      QUERY_EMBED_URL: ${QUERY_EMBED_URL:-http://local-indexer:8080}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   local-indexer:
     build:
       context: .
@@ -23,18 +33,28 @@ services:
       QDRANT_COLLECTION: lirify_lyrics_qwen3
       PUBLISH_ON_INDEX: "1"
       LOAD_ON_START: "1"
+      ADMIN_PORT: "8080"
     volumes:
       - hf_cache:/root/.cache/huggingface
     ports:
       - "50052:50051"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      # Database CRUD/reset UI: loopback only, never exposed publicly.
+      - "127.0.0.1:8082:8080"
+    # CPU by default: this host has no NVIDIA container runtime yet. After
+    # configuring nvidia-container-toolkit add the GPU reservation back:
+    #   deploy:
+    #     resources:
+    #       reservations:
+    #         devices:
+    #           - driver: nvidia
+    #             count: all
+    #             capabilities: [gpu]
+    # and rebuild with --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124
     restart: unless-stopped
+
+  web:
+    environment:
+      SEMANTIC_SEARCH: "true"
 
   local-ui:
     build: ./services/go-ui
@@ -44,6 +64,7 @@ services:
       DASHBOARD_MODE: local
       GRPC_TARGET: local-indexer:50051
       GRPC_TLS: "false"
+      ADMIN_API_URL: http://local-indexer:8080
       PUBLIC_PLAYER_URL: http://localhost:4321
     ports:
       - "8090:8080"

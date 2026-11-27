@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -37,6 +38,24 @@ MAX_INDEXED_SONGS = int(os.environ.get("MAX_INDEXED_SONGS", "3000"))
 REFRESH_SECONDS = float(os.environ.get("INDEX_REFRESH_SECONDS", "60"))
 FRESHNESS_CHECK_SECONDS = float(os.environ.get("INDEX_CHECK_SECONDS", "10"))
 PUBLIC_RATE_LIMIT = int(os.environ.get("PUBLIC_RATE_LIMIT_PER_MINUTE", "0"))
+QUERY_EMBED_URL = (os.environ.get("QUERY_EMBED_URL") or "").strip().rstrip("/")
+QUERY_EMBED_TIMEOUT = float(os.environ.get("QUERY_EMBED_TIMEOUT", "10"))
+CF_ACCOUNT_ID = (
+    os.environ.get("CF_ACCOUNT_ID") or os.environ.get("CLOUDFLARE_ACCOUNT_ID") or ""
+).strip()
+CF_API_TOKEN = (
+    os.environ.get("CF_API_TOKEN") or os.environ.get("CLOUDFLARE_API_TOKEN") or ""
+).strip()
+CF_EMBED_MODEL = (
+    os.environ.get("CF_EMBED_MODEL") or "@cf/qwen/qwen3-embedding-0.6b"
+).strip()
+CF_EMBED_TIMEOUT = float(os.environ.get("CF_EMBED_TIMEOUT", "20"))
+QUERY_EMBEDDINGS = bool(QUERY_EMBED_URL or (CF_ACCOUNT_ID and CF_API_TOKEN))
+QUERY_EMBEDDING_PROVIDER = (
+    "local"
+    if QUERY_EMBED_URL
+    else ("cloudflare" if CF_ACCOUNT_ID and CF_API_TOKEN else "none")
+)
 
 DURATIONS: dict[str, float] = {}
 STATE: dict[str, Any] = {
@@ -169,6 +188,83 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
+def _embed_query_local(texto: str) -> list[float] | None:
+    if not QUERY_EMBED_URL:
+        return None
+    respuesta = requests.post(
+        f"{QUERY_EMBED_URL}/db/embed",
+        json={"texts": [texto]},
+        timeout=QUERY_EMBED_TIMEOUT,
+    )
+    respuesta.raise_for_status()
+    vectores = (respuesta.json() or {}).get("vectors") or []
+    return vectores[0] if vectores else None
+
+
+def _embed_query_cloudflare(texto: str) -> list[float] | None:
+    """Qwen3-Embedding-0.6B through Cloudflare Workers AI.
+
+    Same model family as the local indexer, so query vectors live in the same
+    space as the published lyrics embeddings.
+    """
+    if not (CF_ACCOUNT_ID and CF_API_TOKEN):
+        return None
+    url = (
+        f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}"
+        f"/ai/run/{CF_EMBED_MODEL}"
+    )
+    respuesta = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {CF_API_TOKEN}"},
+        json={"text": [texto]},
+        timeout=CF_EMBED_TIMEOUT,
+    )
+    respuesta.raise_for_status()
+    payload = respuesta.json() or {}
+    if payload.get("success") is False:
+        raise RuntimeError(str(payload.get("errors") or "cloudflare embedding failed"))
+    result = payload.get("result")
+    if isinstance(result, list):
+        data = result
+    else:
+        result = result or {}
+        data = (
+            result.get("data")
+            or result.get("embeddings")
+            or result.get("response")
+            or payload.get("data")
+            or payload.get("embeddings")
+        )
+    if isinstance(data, dict):
+        data = data.get("data") or data.get("embeddings")
+    if not data:
+        raise RuntimeError("cloudflare embedding response has no vectors")
+    if isinstance(data[0], (int, float)):
+        data = [data]
+    return [float(value) for value in data[0]]
+
+
+def _embed_query(texto: str) -> list[float] | None:
+    """Embed a query with the same Qwen3 model the indexer uses.
+
+    The local indexer is preferred (free, exact checkpoint); Cloudflare Workers AI
+    is the fallback for a deployment that cannot reach the laptop.
+    """
+    if QUERY_EMBED_URL:
+        try:
+            vector = _embed_query_local(texto)
+            if vector:
+                return vector
+        except requests.RequestException as exc:
+            print(f"[lirify] local query embedding failed: {exc}", flush=True)
+    if CF_ACCOUNT_ID and CF_API_TOKEN:
+        try:
+            return _embed_query_cloudflare(texto)
+        except (requests.RequestException, RuntimeError, ValueError, KeyError) as exc:
+            print(f"[lirify] Cloudflare query embedding failed: {exc}", flush=True)
+    return None
+
+
 def _summary(song: dict[str, Any], score: float) -> dict[str, Any]:
     return {
         "video_id": song["video_id"],
@@ -186,6 +282,35 @@ def search(q: str, limit: int = 20) -> dict[str, Any]:
     limite = max(1, min(int(limit or 20), 100))
     if not query:
         return {"query": q, "results": []}
+
+    if QUERY_EMBEDDINGS and VECTORS.backend != "none":
+        try:
+            vector = _embed_query(query)
+            if vector:
+                candidatos = VECTORS.search_vector(vector, limite * 4)
+                semanticos = []
+                consulta_tokens = _tokens(query)
+                for meta, similitud in candidatos:
+                    song = STATE["by_id"].get(meta.get("video_id", ""))
+                    if song is None:
+                        continue
+                    puntaje = (
+                        WEIGHTS["lyrics"] * float(similitud)
+                        + WEIGHTS["name"]
+                        * _jaccard(consulta_tokens, _tokens(song["track"]))
+                        + WEIGHTS["artist"]
+                        * _jaccard(consulta_tokens, _tokens(song["artist"]))
+                    )
+                    semanticos.append(_summary(song, puntaje))
+                semanticos.sort(key=lambda row: -row["score"])
+                if semanticos:
+                    return {
+                        "query": query,
+                        "results": semanticos[:limite],
+                        "engine": "embeddings",
+                    }
+        except requests.RequestException as exc:
+            print(f"[lirify] query embedding failed: {exc}", flush=True)
 
     consulta = _tokens(query)
     frase = query.lower()
@@ -313,6 +438,8 @@ def stats_payload() -> dict[str, Any]:
         "revision": STATE_REV,
         "embedding_model": build.get("embedding_model", ""),
         "embedding_dim": build.get("embedding_dim", 0),
+        "query_embeddings": QUERY_EMBEDDINGS,
+        "query_embedding_provider": QUERY_EMBEDDING_PROVIDER,
     }
 
 
@@ -324,6 +451,8 @@ def health():
         "serve_only": True,
         "revision": STATE_REV,
         "indexed_songs": len(STATE["songs"]),
+        "query_embeddings": QUERY_EMBEDDINGS,
+        "query_embedding_provider": QUERY_EMBEDDING_PROVIDER,
     }
 
 

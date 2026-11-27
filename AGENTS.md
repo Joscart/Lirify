@@ -75,7 +75,13 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   reorder providers there.
 - `services/local-indexer/pipeline.py` serialises playlists, keeps jobs in
   memory and calls `core.Indexer` → `core.publicar`. `local_server.py` is the
-  gRPC entrypoint for `local-ui`; it registers both services.
+  gRPC entrypoint for `local-ui`; it registers both services and starts the
+  admin HTTP app on `ADMIN_PORT` (8080).
+- `services/local-indexer/db_admin.py` + `admin_api.py` are the local CRUD
+  surface for Atlas and Qdrant (create/update/delete songs, delete/re-embed
+  vectors, rebuild and **reset to zero**). go-ui proxies them under `/api/db/*`
+  from the **Databases** panel. The HTTP port is published on `127.0.0.1:8082`
+  only; never expose it.
 - `services/api/app/main.py` is now a small read-only server: committed `STATE`
   from Atlas, lexical `search`, Qdrant `recommend_songs`, stats and the player
   router. It builds no matrices and imports no ingestion code.
@@ -97,7 +103,8 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   `/api/local-index`. `/api/tracks` lists every committed track.
 - `services/web` is the Astro SSR player. `src/lib/grpc.ts` is server-only;
   `src/lib/cloudflare.ts` expands search queries with Workers AI;
-  `src/lib/search-ai.ts` merges the per-keyword gRPC searches.
+  `src/lib/search-ai.ts` sends the raw query when `SEMANTIC_SEARCH=true` and
+  otherwise merges per-keyword gRPC searches.
   `src/pages/api/player/[...path].ts` answers search/recommend/lyrics and proxies
   read-only endpoints to python-backend.
 - `scripts/` (except `gen_proto.sh` and `scripts/local/`) is standalone
@@ -114,7 +121,12 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   generic tokenizer instead of being dropped.
 - Duplicates are skipped per `video_id` inside `core.indexar_canciones`.
 - `core.publicar()` writes songs to Atlas and LLM embeddings to Qdrant, then bumps
-  `index_stats.revision`. It is the only cloud write path.
+  `index_stats.revision`. It is the only bulk cloud write path; the local admin
+  CRUD (`db_admin.py`) updates one song at a time and keeps the in-memory index
+  and the Qdrant point in sync.
+- **Reset to zero** (`POST /db/vectors/reset`) drops the Qdrant collection,
+  reloads terms from Atlas and re-embeds every song. **Rebuild vectors**
+  (`POST /db/vectors/rebuild`) does the same without dropping the collection.
 - No matrices are published. `index_stats.build` carries counts and embedding
   metadata only.
 - `PUBLISH_ON_INDEX=1` publishes after each committed playlist;
@@ -130,7 +142,13 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
   collection `lirify_lyrics_qwen3`.
 - Similarity weights in the cloud live in `main.WEIGHTS`: name `.10`, artist
   `.05`, lyrics `.85`. Jaccard is **only** title/artist; lyrics is Qdrant
-  similarity. Language is not a similarity dimension and there is no allow-list.
+  similarity.
+- Web search embeds the query with the indexing model: `python-backend` prefers
+  `QUERY_EMBED_URL/db/embed` (local indexer admin) and falls back to Cloudflare
+  Workers AI `@cf/qwen/qwen3-embedding-0.6b` (`CF_ACCOUNT_ID` + `CF_API_TOKEN`),
+  then searches Qdrant. `SEMANTIC_SEARCH=true` sends the raw query; with neither
+  embedder configured search is lexical. Verify Cloudflare with
+  `scripts/local/verify_cloudflare_embed.py`. Language is not a similarity dimension and there is no allow-list.
 - The public REST surface is rate limited per IP
   (`PUBLIC_RATE_LIMIT_PER_MINUTE`; 0 disables it).
 
@@ -141,8 +159,11 @@ Deep dives: `docs/ARCHITECTURE.md`, `docs/DEPLOYMENT.md`,
 - Switching embedding dimension requires a **new Qdrant collection name**
   (`QDRANT_COLLECTION`) plus a publish backfill. Never point 1024-dim vectors at
   the old 256-dim `lirify_lyrics`.
-- `local_indexer` is GPU-heavy on first run (torch + model download). Keep the
-  `hf_cache` volume; deleting it forces a full re-download.
+- `local_indexer` is heavy on first run (torch + model download). The image
+  defaults to **CPU torch** because this host has no NVIDIA container runtime;
+  build with `--build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124`
+  after configuring nvidia-container-toolkit. Keep the `hf_cache` volume;
+  deleting it forces a full re-download.
 - `data/` is legacy and unmounted. Do not reintroduce file I/O in the cloud API.
 - `services/api/app/qwen_tokenizer.py` is no longer imported by any service; it is
   kept only because it carries uncommitted user edits.

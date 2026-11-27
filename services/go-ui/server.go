@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/cache", s.cache)
 	mux.HandleFunc("GET /api/matrices/preview", s.matrixPreview)
 	mux.HandleFunc("GET /api/tracks", s.tracks)
+	for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
+		mux.HandleFunc(method+" /api/db/", s.requireLocal(s.dbProxy))
+	}
 	mux.HandleFunc("GET /api/events", s.events)
 	// Mutating routes exist only for the laptop dashboard. On Cloud Run every one
 	// of them answers 403 without dialling python-backend.
@@ -245,6 +249,52 @@ func (s *Server) tracks(w http.ResponseWriter, r *http.Request) {
 		"limit":  limit,
 		"tracks": rows,
 	})
+}
+
+// dbProxy forwards the database CRUD surface to the standalone local indexer.
+// The browser stays on this origin; the admin API listens on 127.0.0.1 only and
+// is never exposed by the cloud dashboard.
+func (s *Server) dbProxy(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.AdminURL == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"detail": "ADMIN_API_URL is not configured for local mode",
+		})
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/db")
+	target := s.cfg.AdminURL + "/db" + path
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "could not read body"})
+		return
+	}
+	request, err := http.NewRequestWithContext(r.Context(), r.Method, target, bytes.NewReader(body))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"detail": err.Error()})
+		return
+	}
+	if contentType := r.Header.Get("Content-Type"); contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+	request.Header.Set("Accept", "application/json")
+
+	// Rebuild/reset can re-embed thousands of songs: allow a long request.
+	client := &http.Client{Timeout: 2 * time.Hour}
+	response, err := client.Do(request)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"detail": "local indexer unreachable: " + err.Error()})
+		return
+	}
+	defer response.Body.Close()
+	if contentType := response.Header.Get("Content-Type"); contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.WriteHeader(response.StatusCode)
+	_, _ = io.Copy(w, response.Body)
 }
 
 func (s *Server) matrixPreview(w http.ResponseWriter, r *http.Request) {

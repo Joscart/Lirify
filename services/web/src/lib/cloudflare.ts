@@ -13,8 +13,8 @@
 
 const MODEL = (process.env.CF_AI_MODEL || "@cf/meta/llama-3.1-8b-instruct").trim();
 const WORKER_URL = (process.env.CF_WORKER_URL || "").trim().replace(/\/+$/, "");
-const ACCOUNT_ID = (process.env.CF_ACCOUNT_ID || "").trim();
-const API_TOKEN = (process.env.CF_API_TOKEN || "").trim();
+const ACCOUNT_ID = (process.env.CF_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID || "").trim();
+const API_TOKEN = (process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "").trim();
 const TIMEOUT_MS = Number(process.env.CF_AI_TIMEOUT_MS || 6000);
 
 const SYSTEM = [

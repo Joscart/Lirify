@@ -254,6 +254,11 @@ class VectorStore:
     def neighbours(self, video_id: str, limit: int = 10) -> list[tuple[str, float]]:
         return []
 
+    def search_vector(
+        self, vector: list[float], limit: int = 10
+    ) -> list[tuple[dict[str, Any], float]]:
+        return []
+
 
 class QdrantStore(VectorStore):
     backend = "qdrant"
@@ -459,6 +464,29 @@ class QdrantStore(VectorStore):
             candidate = (hit.get("payload") or {}).get("video_id")
             if candidate:
                 out.append((candidate, float(hit.get("score", 0.0))))
+        return out[:limit]
+
+    def search_vector(
+        self, vector: list[float], limit: int = 10
+    ) -> list[tuple[dict[str, Any], float]]:
+        if not vector or not self.ensure():
+            return []
+        payload = self._request(
+            "POST",
+            "/points/search",
+            json={
+                "vector": vector,
+                "limit": max(1, min(limit, 100)),
+                "with_payload": True,
+                "with_vector": False,
+            },
+        )
+        hits = (payload or {}).get("result") or []
+        out: list[tuple[dict[str, Any], float]] = []
+        for hit in hits:
+            meta = hit.get("payload") or {}
+            if meta.get("video_id"):
+                out.append((meta, float(hit.get("score", 0.0))))
         return out[:limit]
 
 

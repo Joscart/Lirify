@@ -393,10 +393,11 @@ class Indexer:
             backend=str(cancion.get("backend") or ""),
         )
 
-    def indexar_canciones(self, canciones: Iterable[dict[str, Any]]) -> list[int]:
+    def indexar_canciones(
+        self, canciones: Iterable[dict[str, Any]], calcular_embeddings: bool = True
+    ) -> list[int]:
         existentes = {video_id for video_id in self.ids if video_id}
         agregados = []
-        nuevos = []
         for cancion in canciones:
             video_id = str(cancion.get("video_id") or cancion.get("videoId") or "")
             if video_id and video_id in existentes:
@@ -407,14 +408,121 @@ class Indexer:
             if video_id:
                 existentes.add(video_id)
             agregados.append(id_documento)
-            nuevos.append(cancion)
-        if agregados:
-            if self.matriz_embeddings_llm is None:
-                self.construir_matriz_embeddings_llm()
-            else:
-                for id_documento in agregados:
-                    self.agregar_documento_con_embeddings(id_documento)
+        if agregados and calcular_embeddings and self.matriz_embeddings_llm is not None:
+            for id_documento in agregados:
+                self.agregar_documento_con_embeddings(id_documento)
         return agregados
+
+    def id_de(self, video_id: str) -> int | None:
+        for id_documento, actual in enumerate(self.ids):
+            if actual == video_id:
+                return id_documento
+        return None
+
+    def _quitar_terminos(self, id_documento: int) -> None:
+        for palabra in list(self.inverted_index):
+            documentos = self.inverted_index[palabra]
+            if id_documento not in documentos:
+                continue
+            del documentos[id_documento]
+            if not documentos:
+                del self.inverted_index[palabra]
+                self.vocabulary.discard(palabra)
+
+    def _aplicar_terminos(self, id_documento: int, terminos: Sequence[str]) -> None:
+        for posicion, palabra in enumerate(terminos):
+            self.vocabulary.add(palabra)
+            self.inverted_index.setdefault(palabra, {}).setdefault(
+                id_documento, []
+            ).append(posicion)
+
+    def actualizar_cancion(self, cancion: dict[str, Any]) -> bool:
+        """Update one indexed song in place; returns False when it is unknown."""
+        video_id = str(cancion.get("video_id") or cancion.get("videoId") or "")
+        id_documento = self.id_de(video_id)
+        if id_documento is None:
+            return False
+
+        letra = str(cancion.get("lyrics") or cancion.get("letra") or "")
+        terminos = self.procesar_texto(letra) or []
+        self._quitar_terminos(id_documento)
+        if terminos:
+            self._aplicar_terminos(id_documento, terminos)
+
+        self.ids[id_documento] = video_id
+        self.titulos[id_documento] = str(
+            cancion.get("track") or cancion.get("title") or ""
+        )
+        self.artistas[id_documento] = str(cancion.get("artist") or "")
+        self.idiomas[id_documento] = str(cancion.get("language") or "")
+        self.backends[id_documento] = str(cancion.get("backend") or "")
+        self.letras[id_documento] = letra
+
+        self.invalidar_matrices()
+        if self.matriz_embeddings_llm is not None:
+            if terminos:
+                self.agregar_documento_con_embeddings(id_documento)
+            else:
+                self.matriz_embeddings_llm[id_documento] = 0.0
+        return True
+
+    def eliminar_cancion(self, video_id: str) -> bool:
+        """Remove one song, compacting the last document into its slot."""
+        id_documento = self.id_de(video_id)
+        if id_documento is None:
+            return False
+
+        self._quitar_terminos(id_documento)
+        ultimo = max(self.docs_id)
+        if id_documento != ultimo:
+            for documentos in self.inverted_index.values():
+                if ultimo in documentos:
+                    documentos[id_documento] = documentos.pop(ultimo)
+            for campo in (
+                self.ids,
+                self.titulos,
+                self.artistas,
+                self.idiomas,
+                self.backends,
+                self.letras,
+            ):
+                if ultimo < len(campo):
+                    campo[id_documento] = campo[ultimo]
+
+        self.docs_id.discard(ultimo)
+        for campo in (
+            self.ids,
+            self.titulos,
+            self.artistas,
+            self.idiomas,
+            self.backends,
+            self.letras,
+        ):
+            while len(campo) > ultimo:
+                campo.pop()
+
+        if self.matriz_embeddings_llm is not None:
+            if id_documento != ultimo:
+                self.matriz_embeddings_llm[id_documento] = self.matriz_embeddings_llm[
+                    ultimo
+                ]
+            self.matriz_embeddings_llm = self.matriz_embeddings_llm[:ultimo]
+
+        self.invalidar_matrices()
+        return True
+
+    def limpiar(self) -> None:
+        self.inverted_index = {}
+        self.vocabulary = set()
+        self.docs_id = set()
+        self.ids = []
+        self.titulos = []
+        self.artistas = []
+        self.idiomas = []
+        self.backends = []
+        self.letras = []
+        self.matriz_embeddings_llm = None
+        self.invalidar_matrices()
 
     def construir_matriz_incidencia_binaria(self) -> np.ndarray:
         matriz = np.zeros((len(self.vocabulary), len(self.docs_id)), dtype=int)
@@ -492,6 +600,11 @@ class Indexer:
         vectores = modelo.encode(list(textos), convert_to_numpy=True)
         matriz = np.asarray(vectores, dtype=np.float32)
         return matriz.reshape(len(textos), -1)
+
+    def embedding_de_texto(self, texto: str) -> list[float]:
+        vector = self._codificar([limpiar_letra(texto) or texto])[0]
+        self.dimension_embeddings = int(vector.shape[0])
+        return vector.astype(float).tolist()
 
     def construir_matriz_embeddings_llm(self) -> np.ndarray:
         ids = sorted(self.docs_id)
@@ -694,30 +807,77 @@ class Indexer:
     # ------------------------------------------------------------------
     # Publicación a la nube (solo canciones + embeddings LLM)
     # ------------------------------------------------------------------
+    def _documento_de_cancion(
+        self, cancion: dict[str, Any], ahora: float | None = None
+    ) -> dict[str, Any] | None:
+        video_id = str(cancion.get("video_id") or cancion.get("videoId") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id or ""):
+            return None
+        letra = str(cancion.get("lyrics") or "")
+        if not letra.strip():
+            return None
+        return {
+            "videoId": video_id,
+            "title": str(cancion.get("track") or cancion.get("title") or ""),
+            "youtubeTitle": str(cancion.get("title") or cancion.get("track") or ""),
+            "artist": str(cancion.get("artist") or ""),
+            "language": str(cancion.get("language") or ""),
+            "lyrics": letra,
+            "backend": str(cancion.get("backend") or ""),
+            "schemaVersion": 1,
+            "updatedAt": ahora or time.time(),
+        }
+
     def _documentos_mongo(self) -> list[dict[str, Any]]:
-        ahora = time.time()
         documentos = []
         vistos: set[str] = set()
         for i in sorted(self.docs_id):
-            video_id = self.ids[i] if i < len(self.ids) else ""
-            if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id or ""):
-                continue
-            if video_id in vistos:
-                continue
-            vistos.add(video_id)
-            documentos.append(
+            documento = self._documento_de_cancion(
                 {
-                    "videoId": video_id,
-                    "title": self.titulos[i] or "",
-                    "artist": self.artistas[i] or "",
-                    "language": self.idiomas[i] or "",
-                    "lyrics": self.letras[i] or "",
-                    "backend": self.backends[i] or "",
-                    "schemaVersion": 1,
-                    "updatedAt": ahora,
+                    "video_id": self.ids[i] if i < len(self.ids) else "",
+                    "track": self.titulos[i] if i < len(self.titulos) else "",
+                    "artist": self.artistas[i] if i < len(self.artistas) else "",
+                    "language": self.idiomas[i] if i < len(self.idiomas) else "",
+                    "lyrics": self.letras[i] if i < len(self.letras) else "",
+                    "backend": self.backends[i] if i < len(self.backends) else "",
                 }
             )
+            if documento is None or documento["videoId"] in vistos:
+                continue
+            vistos.add(documento["videoId"])
+            documentos.append(documento)
         return documentos
+
+    def _puntos_de_canciones(
+        self, canciones: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        validas = []
+        for cancion in canciones:
+            documento = self._documento_de_cancion(cancion)
+            if documento is not None:
+                validas.append((documento, cancion))
+        if not validas:
+            return []
+        vectores = self._codificar(
+            [
+                limpiar_letra(documento["lyrics"]) or documento["lyrics"]
+                for documento, _ in validas
+            ]
+        )
+        self.dimension_embeddings = int(vectores.shape[1])
+        return [
+            {
+                "id": id_punto(documento["videoId"]),
+                "vector": vector.astype(float).tolist(),
+                "payload": {
+                    "video_id": documento["videoId"],
+                    "title": documento["title"],
+                    "artist": documento["artist"],
+                    "language": documento["language"],
+                },
+            }
+            for (documento, _), vector in zip(validas, vectores)
+        ]
 
     def _puntos_qdrant(self) -> list[dict[str, Any]]:
         if self.matriz_embeddings_llm is None:
@@ -749,8 +909,13 @@ class Indexer:
         qdrant_api_key: str | None = None,
         coleccion: str | None = None,
         lote: int = 64,
+        solo: Iterable[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Write songs to Atlas and LLM embeddings to Qdrant. Nothing else."""
+        """Write songs to Atlas and LLM embeddings to Qdrant. Nothing else.
+
+        ``solo`` limits the write to a freshly indexed batch: only those songs are
+        embedded and upserted, instead of re-encoding the whole library.
+        """
         from pymongo import MongoClient, UpdateOne
 
         uri = (
@@ -771,11 +936,26 @@ class Indexer:
         if not uri:
             raise RuntimeError("MONGODB_URI is required to publish")
 
-        canciones = self._documentos_mongo()
+        puntos = None
+        if solo is None:
+            canciones = self._documentos_mongo()
+        else:
+            lote_canciones = list(solo)
+            documentos = [
+                documento
+                for documento in (
+                    self._documento_de_cancion(cancion) for cancion in lote_canciones
+                )
+                if documento is not None
+            ]
+            canciones = documentos
+            puntos = self._puntos_de_canciones(lote_canciones)
         if not canciones:
             raise RuntimeError(
                 "Nothing indexed yet: index a playlist before publishing"
             )
+        if solo is None and self.matriz_embeddings_llm is None:
+            self.construir_matriz_embeddings_llm()
 
         cliente = MongoClient(uri, serverSelectionTimeoutMS=15000)
         base = cliente[db_name]
@@ -801,7 +981,7 @@ class Indexer:
         vectores = 0
         if qdrant_url:
             vectores = self._publicar_qdrant(
-                qdrant_url, qdrant_api_key, coleccion, lote
+                qdrant_url, qdrant_api_key, coleccion, lote, puntos
             )
 
         estadisticas = self.estadisticas()
@@ -837,11 +1017,17 @@ class Indexer:
         }
 
     def _publicar_qdrant(
-        self, url: str, api_key: str, coleccion: str, lote: int
+        self,
+        url: str,
+        api_key: str,
+        coleccion: str,
+        lote: int,
+        puntos: list[dict[str, Any]] | None = None,
     ) -> int:
         import requests
 
-        puntos = self._puntos_qdrant()
+        if puntos is None:
+            puntos = self._puntos_qdrant()
         if not puntos:
             return 0
         base = url.rstrip("/")

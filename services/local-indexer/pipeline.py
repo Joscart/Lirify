@@ -110,9 +110,7 @@ class Pipeline:
                     return
 
                 self._actualizar(job, status="indexing", stage="index")
-                agregados = await asyncio.to_thread(
-                    self.indexer.indexar_canciones, canciones
-                )
+                agregados = await asyncio.to_thread(self._indexar_lote, canciones)
                 self._actualizar(
                     job,
                     status="committed",
@@ -120,9 +118,18 @@ class Pipeline:
                     added=len(agregados),
                 )
 
-                if self.auto_publicar:
+                if self.auto_publicar and agregados:
                     self._actualizar(job, stage="publish")
-                    await asyncio.to_thread(self.publicar)
+                    with self._lock:
+                        nuevos = {
+                            self.indexer.ids[id_documento] for id_documento in agregados
+                        }
+                    lote = [
+                        cancion
+                        for cancion in canciones
+                        if str(cancion.get("video_id") or "") in nuevos
+                    ]
+                    await asyncio.to_thread(self.publicar, solo=lote)
                     self._actualizar(job, stage="published")
             except Exception as exc:  # noqa: BLE001 - job boundary
                 self.ultimo_error = f"{type(exc).__name__}: {exc}"
@@ -134,6 +141,10 @@ class Pipeline:
                     error_code=self._codigo_error(str(exc)),
                 )
         self._finalizar_job(job)
+
+    def _indexar_lote(self, canciones: list[dict[str, Any]]) -> list[int]:
+        with self._lock:
+            return self.indexer.indexar_canciones(canciones)
 
     def _progreso(
         self, job: dict[str, Any], etapa: str, campos: dict[str, Any]
@@ -172,13 +183,15 @@ class Pipeline:
     # ------------------------------------------------------------------
     # Publicación
     # ------------------------------------------------------------------
-    def publicar(self, lote: int = 64) -> dict[str, Any]:
+    def publicar(
+        self, lote: int = 64, solo: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
         with self._lock:
             if not self.indexer.docs_id:
                 raise RuntimeError("Nothing indexed yet")
-            if self.indexer.matriz_embeddings_llm is None:
+            if solo is None and self.indexer.matriz_embeddings_llm is None:
                 self.indexer.construir_matriz_embeddings_llm()
-            resultado = self.indexer.publicar(lote=lote)
+            resultado = self.indexer.publicar(lote=lote, solo=solo)
             self.revision = int(resultado.get("revision") or 0)
             self.publicado_en = int(time.time())
             print(
@@ -240,9 +253,15 @@ class Pipeline:
         base.client.close()
 
         with self._lock:
-            self.indexer.indexar_canciones(canciones)
+            self.indexer.indexar_canciones(canciones, calcular_embeddings=False)
         print(f"[lirify] loaded {len(canciones)} songs from Atlas", flush=True)
         return len(canciones)
+
+    def reiniciar_indice(self) -> int:
+        """Drop the in-memory index and rehydrate terms from Atlas."""
+        with self._lock:
+            self.indexer.limpiar()
+        return self.cargar_desde_atlas()
 
     # ------------------------------------------------------------------
     # Lecturas

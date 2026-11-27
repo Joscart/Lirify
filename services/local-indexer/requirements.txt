@@ -9,6 +9,8 @@ yt-dlp>=2024.1.1
 langdetect>=1.0.9,<2
 pymongo>=4.9,<5
 dnspython>=2.3
+fastapi
+uvicorn[standard]
 grpcio>=1.62,<2
 grpcio-health-checking>=1.62,<2
 grpcio-reflection>=1.62,<2

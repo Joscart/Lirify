@@ -68,11 +68,14 @@ container writes to disk.
 - **Recommendations** use the pre-computed embeddings only: Qdrant cosine
   neighbours per seed, blended with `.10` title / `.05` artist Jaccard
   (`.85` lyrics). Weights live in `python-backend` (`main.WEIGHTS`).
-- **Web search** is understood by Cloudflare Workers AI: Astro asks the Worker
-  (or the Workers AI REST API) for 1–3 catalogue keywords, then runs one gRPC
-  `Search` per keyword and merges by score. Configure `CF_WORKER_URL`, or
-  `CF_ACCOUNT_ID` + `CF_API_TOKEN`; without them the route falls back to lexical
-  search.
+- **Web search** embeds the query with the same Qwen3-Embedding-0.6B model used
+  for indexing. `python-backend` prefers `QUERY_EMBED_URL/db/embed` (the local
+  indexer) and falls back to Cloudflare Workers AI
+  (`CF_ACCOUNT_ID` + `CF_API_TOKEN`, model `@cf/qwen/qwen3-embedding-0.6b`), then
+  searches Qdrant with that 1024-dim vector. Set `SEMANTIC_SEARCH=true` on the
+  web service to send the raw query. Verify the Cloudflare model with
+  `scripts/local/verify_cloudflare_embed.py`. Without either embedder search is
+  lexical; Cloudflare remains an optional query expander for the web UI.
 
 ## Run the cloud serving stack locally
 
@@ -108,8 +111,19 @@ docker compose -f docker-compose.yml -f docker-compose.local-indexer.yml \
 
 The indexer reads `MONGODB_URI`, `QDRANT_URL` and `QDRANT_API_KEY` from `.env`,
 hydrates committed songs from Atlas at startup, and publishes after every
-committed playlist (`PUBLISH_ON_INDEX=1`). Publish again from the dashboard to
-backfill a new embedding collection.
+committed playlist (`PUBLISH_ON_INDEX=1`).
+
+The **Databases** panel in `local-ui` gives full CRUD over both stores:
+
+- Mongo songs: list/filter, create, edit, delete.
+- Qdrant vectors: list, delete, re-embed one point.
+- **Rebuild vectors**: re-embed every song over the existing collection.
+- **Reset to zero**: drop the collection, reload the index from Atlas and
+  re-embed everything from scratch.
+
+The admin HTTP app runs inside `local-indexer` on container port 8080 and is
+published as `127.0.0.1:8082` only; go-ui proxies it server-side under
+`/api/db/*`.
 
 ## Verify
 

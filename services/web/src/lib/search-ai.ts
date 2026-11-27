@@ -15,7 +15,15 @@ export interface AiSearchPayload extends SearchPayload {
   keywords: string[];
 }
 
+const SEMANTIC = (process.env.SEMANTIC_SEARCH || "").toLowerCase() === "true";
+
 export async function searchWithAi(query: string, limit = 24): Promise<AiSearchPayload> {
+  // When python-backend embeds the query with Qwen3 (QUERY_EMBED_URL), send the
+  // raw query: no keyword rewriting, so the vector matches the indexed lyrics.
+  if (SEMANTIC) {
+    const payload = await search((query || "").trim(), limit);
+    return { ...payload, ai_source: "none", keywords: [(query || "").trim()] };
+  }
   const expansion = await expandQuery(query);
   const keywords = expansion.keywords.length ? expansion.keywords : [query];
 

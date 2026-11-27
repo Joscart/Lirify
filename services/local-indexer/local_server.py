@@ -13,8 +13,10 @@ import signal
 import time
 from typing import Any
 
+import admin_api
 import grpc
 import ingest
+import uvicorn
 from grpc import aio as grpc_aio
 from lirifypb import lirify_pb2 as pb
 from lirifypb import lirify_pb2_grpc as pb_grpc
@@ -374,9 +376,27 @@ async def start_local_server(port: int | None = None) -> grpc_aio.Server:
     return server
 
 
+async def start_admin_server() -> tuple[uvicorn.Server, asyncio.Task]:
+    config = uvicorn.Config(
+        admin_api.build_app(PIPELINE),
+        host="0.0.0.0",
+        port=int(os.environ.get("ADMIN_PORT", "8080")),
+        log_level=os.environ.get("ADMIN_LOG_LEVEL", "warning"),
+        access_log=False,
+    )
+    server = uvicorn.Server(config)
+    task = asyncio.create_task(server.serve())
+    print(
+        f"[lirify] database admin listening on :{config.port} (localhost only)",
+        flush=True,
+    )
+    return server, task
+
+
 async def serve() -> None:
-    await PIPELINE.arrancar()
     server = await start_local_server()
+    admin, admin_task = await start_admin_server()
+    carga = asyncio.create_task(PIPELINE.arrancar())
     stop = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -384,8 +404,14 @@ async def serve() -> None:
         except (NotImplementedError, RuntimeError):  # pragma: no cover
             pass
     await stop.wait()
+    admin.should_exit = True
+    carga.cancel()
     await PIPELINE.detener()
     await server.stop(grace=5)
+    try:
+        await asyncio.wait_for(admin_task, timeout=5)
+    except (TimeoutError, asyncio.CancelledError):
+        admin_task.cancel()
 
 
 def main_entry() -> None:

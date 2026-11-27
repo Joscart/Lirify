@@ -73,16 +73,22 @@ and run offline with a deterministic fake encoder.
 
 ## Search on the web
 
-1. The browser calls Astro `/api/player/search?q=…`.
-2. `src/lib/cloudflare.ts` asks Cloudflare Workers AI (a Worker URL or the
-   Workers AI REST API) to turn the query into 1–3 catalogue keywords.
-3. Astro runs one gRPC `Search` per keyword and merges by best score.
-4. `python-backend` answers `Search` lexically over committed titles, artists
-   and lyrics. It has no embedder on purpose: ranking over lyrics uses the
-   pre-computed vectors, not a query embedding.
+The query is embedded with the **same Qwen3-Embedding-0.6B model** that indexes
+the lyrics, so query vectors and document vectors share one space:
 
-Without Cloudflare credentials the route falls back to a single lexical search,
-so local development keeps working.
+1. The browser calls Astro `/api/player/search?q=…`.
+2. Astro runs gRPC `Search` (with `SEMANTIC_SEARCH=true` it sends the raw query;
+   otherwise Cloudflare Workers AI may expand it into 1–3 keywords).
+3. `python-backend` embeds the text with a 1024-dim vector:
+   - `QUERY_EMBED_URL/db/embed` (the local indexer's admin app) when configured,
+   - otherwise Cloudflare Workers AI
+     `@cf/qwen/qwen3-embedding-0.6b` (`CF_ACCOUNT_ID` + `CF_API_TOKEN`).
+4. It searches Qdrant with that vector and blends `.85` cosine + `.10` title /
+   `.05` artist Jaccard.
+
+Without `QUERY_EMBED_URL`, `Search` falls back to lexical matching over titles,
+artists and lyrics. Without Cloudflare credentials the web route simply skips
+keyword expansion.
 
 ## Recommendations
 
@@ -129,6 +135,23 @@ TypeScript by `scripts/gen_proto.sh` and drift-checked in CI.
 
 The local indexer implements the read RPCs too, so the same dashboard binary
 works against either target (`DASHBOARD_MODE=local` adds the controls).
+
+## Local database admin
+
+`local-indexer` also exposes a small HTTP admin app (`admin_api.py` →
+`db_admin.py`) used by the **Databases** panel in `local-ui`:
+
+| Route | Effect |
+| --- | --- |
+| `GET/POST/PUT/DELETE /db/songs…` | Atlas song CRUD (keeps the in-memory index and the Qdrant point in sync) |
+| `GET /db/vectors`, `DELETE /db/vectors/{id}`, `POST /db/vectors/{id}/embed` | Qdrant point CRUD / single re-embed |
+| `POST /db/vectors/rebuild` | Re-embed every Atlas song over the current collection |
+| `POST /db/vectors/reset` | Drop the collection, reload from Atlas, re-embed from zero |
+| `POST /db/index/reload` | Drop the in-memory index and rehydrate terms from Atlas |
+
+go-ui proxies these under `/api/db/*` in local mode (`ADMIN_API_URL`). The admin
+port is bound to `127.0.0.1:8082` on the host and is never part of the cloud
+deployment.
 
 ## Health and routes
 

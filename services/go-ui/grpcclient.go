@@ -27,6 +27,7 @@ type Config struct {
 	Insecure     bool // local docker compose only; Cloud Run always uses TLS
 	BackendURL   string
 	PlayerURL    string
+	AdminURL     string
 	CallTimeout  time.Duration
 	WatchSeconds int32
 	// Mode is "readonly" (Cloud Run serving dashboard) or "local" (laptop
@@ -59,6 +60,7 @@ func loadConfig() (Config, error) {
 		GRPCTarget:   strings.TrimSpace(os.Getenv("GRPC_TARGET")),
 		BackendURL:   strings.TrimRight(env("PYTHON_BACKEND_URL", ""), "/"),
 		PlayerURL:    env("PUBLIC_PLAYER_URL", "https://lirify.joscart.win"),
+		AdminURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("ADMIN_API_URL")), "/"),
 		CallTimeout:  20 * time.Second,
 		WatchSeconds: 5,
 		Mode:         mode,

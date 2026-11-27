@@ -154,6 +154,11 @@ section[id]{scroll-margin-top:20px}
 .btn-ghost:hover{background:color-mix(in oklab,var(--text-1) 12%,transparent);border-color:var(--line-strong)}
 .btn-outline{color:var(--text-2);border:1px solid var(--line-strong)}
 .btn-outline:hover{color:var(--text-1);border-color:color-mix(in oklab,var(--accent) 45%,transparent)}
+.btn-danger{color:#ff9b9b;border:1px solid color-mix(in oklab,#ff5c5c 45%,var(--line))}
+.btn-danger:hover{color:#ffd0d0;background:color-mix(in oklab,#ff5c5c 14%,transparent)}
+.db-editor{margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:14px;background:color-mix(in oklab,var(--bg-0) 40%,transparent)}
+.db-editor .form-row{margin-bottom:8px}
+.db-editor .input{min-width:170px;flex:1}
 .btn-sm{height:32px;padding:0 13px;font-size:11.5px}
 .btn-xs{height:26px;padding:0 9px;font-size:10.5px}
 .icon-btn{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:8px;color:var(--text-3);transition:color .16s,background .16s,transform .16s}
@@ -466,9 +471,10 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
       <a class="nav-item" href="#queue" data-nav="queue"><svg class="icon"><use href="#i-queue"/></svg><span>Queue</span><span class="nav-hint">03</span></a>
       <a class="nav-item" href="#metrics" data-nav="metrics"><svg class="icon"><use href="#i-metrics"/></svg><span>Metrics</span><span class="nav-hint">04</span></a>
       <a class="nav-item" href="#tracks" data-nav="tracks"><svg class="icon"><use href="#i-music"/></svg><span>Tracks</span><span class="nav-hint">05</span></a>
-      <a class="nav-item" href="#matrices" data-nav="matrices"><svg class="icon"><use href="#i-matrix"/></svg><span>Matrices</span><span class="nav-hint">06</span></a>
-      {{if .LocalMode}}<a class="nav-item" href="#local-index" data-nav="local-index"><svg class="icon"><use href="#i-database"/></svg><span>Local index</span><span class="nav-hint">07</span></a>{{end}}
-      <a class="nav-item" href="#diagnostics" data-nav="diagnostics"><svg class="icon"><use href="#i-diagnostics"/></svg><span>Diagnostics</span><span class="nav-hint">{{if .LocalMode}}08{{else}}07{{end}}</span></a>
+      <a class="nav-item" href="#databases" data-nav="databases"><svg class="icon"><use href="#i-database"/></svg><span>Databases</span><span class="nav-hint">06</span></a>
+      <a class="nav-item" href="#matrices" data-nav="matrices"><svg class="icon"><use href="#i-matrix"/></svg><span>Matrices</span><span class="nav-hint">07</span></a>
+      {{if .LocalMode}}<a class="nav-item" href="#local-index" data-nav="local-index"><svg class="icon"><use href="#i-database"/></svg><span>Local index</span><span class="nav-hint">08</span></a>{{end}}
+      <a class="nav-item" href="#diagnostics" data-nav="diagnostics"><svg class="icon"><use href="#i-diagnostics"/></svg><span>Diagnostics</span><span class="nav-hint">{{if .LocalMode}}09{{else}}08{{end}}</span></a>
     </nav>
 
     <div class="side-card">
@@ -704,6 +710,78 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
             </table>
           </div>
           <div class="matrix-meta" id="trackMeta"></div>
+        </section>
+
+        <section class="panel" id="databases">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Database admin</span>
+              <h2>MongoDB &amp; Qdrant</h2>
+              <div class="sub">Read, create, update and delete songs and vectors. Mutations keep Atlas, the in-memory index and the Qdrant point in sync; reset drops the collection and re-embeds every song from Atlas.</div>
+            </div>
+            <div class="panel-actions">
+              <button class="btn btn-ghost btn-sm" id="dbRefresh" type="button"><svg class="icon"><use href="#i-refresh"/></svg>Reload</button>
+              <button class="btn btn-outline btn-sm" id="dbRebuild" type="button">Rebuild vectors</button>
+              <button class="btn btn-danger btn-sm" id="dbReset" type="button">Reset to zero</button>
+            </div>
+          </div>
+          <div class="local-grid" id="dbOverview">
+            <div class="local-cell"><b>—</b><span>loading</span></div>
+          </div>
+          <div class="form-row" style="margin-top:14px">
+            <button class="btn btn-ghost btn-sm" id="dbTabSongs" type="button" data-db-tab="songs">Mongo songs</button>
+            <button class="btn btn-ghost btn-sm" id="dbTabVectors" type="button" data-db-tab="vectors">Qdrant vectors</button>
+            <span style="flex:1"></span>
+            <span class="hint-inline" id="dbMessage"></span>
+          </div>
+
+          <div id="dbSongsPane">
+            <div class="form-row" style="margin-top:12px">
+              <input class="input" id="dbSongQuery" type="search" placeholder="Filter by id, title or artist" style="min-width:240px">
+              <button class="btn btn-ghost btn-sm" id="dbSongSearch" type="button">Search</button>
+              <button class="btn btn-primary btn-sm" id="dbSongNew" type="button">New song</button>
+            </div>
+            <div class="table-scroll" style="margin-top:10px">
+              <table>
+                <thead><tr><th>ID</th><th>Title</th><th>Artist</th><th>Language</th><th>Provider</th><th></th></tr></thead>
+                <tbody id="dbSongRows"><tr><td colspan="6" class="empty-table">Loading songs…</td></tr></tbody>
+              </table>
+            </div>
+            <div class="matrix-meta" id="dbSongMeta"></div>
+          </div>
+
+          <div id="dbVectorsPane" style="display:none">
+            <div class="table-scroll" style="margin-top:12px">
+              <table>
+                <thead><tr><th>ID</th><th>Title</th><th>Artist</th><th>Language</th><th></th></tr></thead>
+                <tbody id="dbVectorRows"><tr><td colspan="5" class="empty-table">Loading vectors…</td></tr></tbody>
+              </table>
+            </div>
+            <div class="matrix-meta" id="dbVectorMeta"></div>
+          </div>
+
+          <div class="db-editor" id="dbEditor" style="display:none">
+            <div class="form-row">
+              <b id="dbEditorTitle">New song</b>
+              <span style="flex:1"></span>
+              <span class="hint-inline" id="dbEditorHint"></span>
+            </div>
+            <div class="form-row">
+              <input class="input" id="dbVideoId" placeholder="video_id (11 chars)" maxlength="11">
+              <input class="input" id="dbTitle" placeholder="Title">
+              <input class="input" id="dbArtist" placeholder="Artist">
+            </div>
+            <div class="form-row">
+              <input class="input" id="dbLanguage" placeholder="Language (en)">
+              <input class="input" id="dbBackend" placeholder="Provider (manual)">
+              <input class="input" id="dbDuration" type="number" min="0" step="1" placeholder="Duration (s)">
+            </div>
+            <textarea class="textarea" id="dbLyrics" rows="8" placeholder="Lyrics (required)" style="margin-top:8px"></textarea>
+            <div class="form-row" style="margin-top:10px">
+              <button class="btn btn-primary btn-sm" id="dbSave" type="button">Save</button>
+              <button class="btn btn-ghost btn-sm" id="dbCancel" type="button">Cancel</button>
+            </div>
+          </div>
         </section>
 
         <section class="panel" id="matrices">
@@ -1338,6 +1416,232 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
     }).join("");
   }
 
+
+  var DB = { tab: "songs", editing: null, songs: [], vectors: [] };
+
+  function dbMessage(text, error) {
+    if (!$("dbMessage")) return;
+    $("dbMessage").textContent = text || "";
+    $("dbMessage").style.color = error ? "#ff9b9b" : "";
+  }
+
+  async function dbRequest(path, options) {
+    var init = Object.assign({ headers: { Accept: "application/json" } }, options || {});
+    if (init.body && !init.headers["Content-Type"]) {
+      init.headers = Object.assign({}, init.headers, { "Content-Type": "application/json" });
+    }
+    var response = await fetch(API + "/db" + path, init);
+    var text = await response.text();
+    var data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch (error) { data = { detail: text }; }
+    if (!response.ok) throw new Error(data.detail || ("HTTP " + response.status));
+    return data;
+  }
+
+  async function loadDbOverview() {
+    var data = await dbRequest("/overview");
+    var q = data.qdrant || {};
+    var cells = [
+      ["Mongo songs", num(data.mongo.songs), "db " + data.mongo.database + " · rev " + num(data.mongo.revision)],
+      ["Qdrant points", num(q.points), q.reachable ? ("collection " + q.collection) : "QDRANT_URL not set"],
+      ["Vector size", q.dim ? num(q.dim) : "—", q.distance || (q.exists ? "" : "collection missing")],
+      ["In-memory index", num(data.index.songs), num(data.index.terms) + " terms · " + num(data.index.embeddings) + " embeddings"],
+    ];
+    $("dbOverview").innerHTML = cells.map(function (cell) {
+      return '<div class="local-cell"><b>' + esc(cell[1]) + '</b><span>' + esc(cell[0]) + '</span><code>' + esc(cell[2] || "") + '</code></div>';
+    }).join("");
+  }
+
+  async function loadDbSongs() {
+    var query = ($("dbSongQuery") && $("dbSongQuery").value || "").trim();
+    var data = await dbRequest("/songs?limit=100&q=" + encodeURIComponent(query));
+    DB.songs = data.songs || [];
+    renderDbSongs(data.total || DB.songs.length);
+  }
+
+  function renderDbSongs(total) {
+    if (!DB.songs.length) {
+      $("dbSongRows").innerHTML = '<tr><td colspan="6" class="empty-table">No songs in Atlas.</td></tr>';
+      if ($("dbSongMeta")) $("dbSongMeta").textContent = "0 songs";
+      return;
+    }
+    $("dbSongRows").innerHTML = DB.songs.map(function (song) {
+      return "<tr>" +
+        '<td><code>' + esc(song.video_id) + '</code></td>' +
+        '<td><b>' + esc(song.track || song.title || "—") + '</b></td>' +
+        '<td>' + esc(song.artist || "—") + '</td>' +
+        '<td><code>' + esc(song.language || "—") + '</code></td>' +
+        '<td>' + esc(song.backend || "—") + '</td>' +
+        '<td class="row-actions">' +
+          '<button class="btn btn-ghost btn-sm" data-db-edit="' + esc(song.video_id) + '" type="button">Edit</button> ' +
+          '<button class="btn btn-danger btn-sm" data-db-delete="' + esc(song.video_id) + '" type="button">Delete</button>' +
+        '</td>' +
+      "</tr>";
+    }).join("");
+    if ($("dbSongMeta")) $("dbSongMeta").textContent = DB.songs.length + " of " + num(total) + " songs";
+  }
+
+  function openDbEditor(song) {
+    DB.editing = song ? song.video_id : null;
+    $("dbEditor").style.display = "";
+    $("dbEditorTitle").textContent = song ? ("Edit " + song.video_id) : "New song";
+    $("dbVideoId").value = song ? (song.video_id || "") : "";
+    $("dbVideoId").disabled = Boolean(song);
+    $("dbTitle").value = song ? (song.title || song.track || "") : "";
+    $("dbArtist").value = song ? (song.artist || "") : "";
+    $("dbLanguage").value = song ? (song.language || "") : "";
+    $("dbBackend").value = song ? (song.backend || "") : "";
+    $("dbDuration").value = song && song.duration ? song.duration : "";
+    $("dbLyrics").value = song ? (song.lyrics || "") : "";
+    $("dbEditorHint").textContent = song ? "Lyrics changes re-index and re-embed this song." : "A new song is inserted into Atlas and indexed immediately.";
+    $("dbEditor").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function closeDbEditor() {
+    DB.editing = null;
+    $("dbEditor").style.display = "none";
+  }
+
+  async function saveDbSong() {
+    var payload = {
+      video_id: $("dbVideoId").value.trim(),
+      title: $("dbTitle").value.trim(),
+      track: $("dbTitle").value.trim(),
+      artist: $("dbArtist").value.trim(),
+      language: $("dbLanguage").value.trim() || "unknown",
+      backend: $("dbBackend").value.trim() || "manual",
+      duration: $("dbDuration").value ? Number($("dbDuration").value) : null,
+      lyrics: $("dbLyrics").value,
+    };
+    try {
+      $("dbSave").disabled = true;
+      if (DB.editing) {
+        await dbRequest("/songs/" + encodeURIComponent(DB.editing), { method: "PUT", body: JSON.stringify(payload) });
+      } else {
+        await dbRequest("/songs", { method: "POST", body: JSON.stringify(payload) });
+      }
+      closeDbEditor();
+      await Promise.all([loadDbOverview(), loadDbSongs(), loadTracks().catch(function () {})]);
+      dbMessage("Saved " + payload.video_id);
+    } catch (error) {
+      dbMessage(error.message, true);
+    } finally {
+      $("dbSave").disabled = false;
+    }
+  }
+
+  async function deleteDbSong(videoId) {
+    if (!confirm("Delete " + videoId + " from Atlas and Qdrant?")) return;
+    try {
+      await dbRequest("/songs/" + encodeURIComponent(videoId), { method: "DELETE" });
+      await Promise.all([loadDbOverview(), loadDbSongs(), loadTracks().catch(function () {})]);
+      dbMessage("Deleted " + videoId);
+    } catch (error) {
+      dbMessage(error.message, true);
+    }
+  }
+
+  async function loadDbVectors() {
+    var data = await dbRequest("/vectors?limit=100");
+    DB.vectors = data.points || [];
+    if (!$("dbVectorRows")) return;
+    if (!data.reachable) {
+      $("dbVectorRows").innerHTML = '<tr><td colspan="5" class="empty-table">The Qdrant collection is missing or unreachable. Use <b>Reset to zero</b> to create it and re-embed every song.</td></tr>';
+      $("dbVectorMeta").textContent = "";
+      return;
+    }
+    if (!DB.vectors.length) {
+      $("dbVectorRows").innerHTML = '<tr><td colspan="5" class="empty-table">The collection is empty.</td></tr>';
+      $("dbVectorMeta").textContent = "0 points";
+      return;
+    }
+    $("dbVectorRows").innerHTML = DB.vectors.map(function (point) {
+      return "<tr>" +
+        '<td><code>' + esc(point.video_id || point.id) + '</code></td>' +
+        '<td><b>' + esc(point.title || "—") + '</b></td>' +
+        '<td>' + esc(point.artist || "—") + '</td>' +
+        '<td><code>' + esc(point.language || "—") + '</code></td>' +
+        '<td class="row-actions">' +
+          '<button class="btn btn-ghost btn-sm" data-db-reembed="' + esc(point.video_id) + '" type="button">Re-embed</button> ' +
+          '<button class="btn btn-danger btn-sm" data-db-vdelete="' + esc(point.video_id) + '" type="button">Delete</button>' +
+        '</td>' +
+      "</tr>";
+    }).join("");
+    $("dbVectorMeta").textContent = DB.vectors.length + " points (page size 100)";
+  }
+
+  async function reembedVector(videoId) {
+    try {
+      await dbRequest("/vectors/" + encodeURIComponent(videoId) + "/embed", { method: "POST" });
+      dbMessage("Re-embedded " + videoId);
+      await loadDbVectors();
+    } catch (error) {
+      dbMessage(error.message, true);
+    }
+  }
+
+  async function deleteVector(videoId) {
+    if (!confirm("Delete the Qdrant point for " + videoId + "?")) return;
+    try {
+      await dbRequest("/vectors/" + encodeURIComponent(videoId), { method: "DELETE" });
+      await Promise.all([loadDbVectors(), loadDbOverview()]);
+      dbMessage("Vector deleted: " + videoId);
+    } catch (error) {
+      dbMessage(error.message, true);
+    }
+  }
+
+  async function rebuildVectors() {
+    if (!confirm("Re-embed every song from Atlas and overwrite the existing vectors?")) return;
+    try {
+      $("dbRebuild").disabled = true;
+      dbMessage("Rebuilding vectors…");
+      var result = await dbRequest("/vectors/rebuild", { method: "POST" });
+      dbMessage("Rebuilt " + num(result.vectors) + " vectors from " + num(result.songs) + " songs");
+      await Promise.all([loadDbOverview(), loadDbVectors()]);
+    } catch (error) {
+      dbMessage(error.message, true);
+    } finally {
+      $("dbRebuild").disabled = false;
+    }
+  }
+
+  async function resetVectors() {
+    if (!confirm("RESET TO ZERO: drop the Qdrant collection and re-embed every song from Atlas. Continue?")) return;
+    try {
+      $("dbReset").disabled = true;
+      $("dbRebuild").disabled = true;
+      dbMessage("Dropping the collection and re-embedding…");
+      var result = await dbRequest("/vectors/reset", { method: "POST" });
+      dbMessage("Reset complete: " + num(result.vectors) + " vectors, revision " + num(result.revision));
+      await Promise.all([loadDbOverview(), loadDbVectors(), loadTracks().catch(function () {})]);
+    } catch (error) {
+      dbMessage(error.message, true);
+    } finally {
+      $("dbReset").disabled = false;
+      $("dbRebuild").disabled = false;
+    }
+  }
+
+  function switchDbTab(tab) {
+    DB.tab = tab;
+    $("dbSongsPane").style.display = tab === "songs" ? "" : "none";
+    $("dbVectorsPane").style.display = tab === "vectors" ? "" : "none";
+    $("dbTabSongs").classList.toggle("is-active", tab === "songs");
+    $("dbTabVectors").classList.toggle("is-active", tab === "vectors");
+    if (tab === "songs") loadDbSongs().catch(function (error) { dbMessage(error.message, true); });
+    else loadDbVectors().catch(function (error) { dbMessage(error.message, true); });
+  }
+
+  async function loadDatabases() {
+    try {
+      await loadDbOverview();
+      await (DB.tab === "vectors" ? loadDbVectors() : loadDbSongs());
+    } catch (error) {
+      dbMessage(error.message, true);
+    }
+  }
+
   async function loadMatrices(force) {
     if (state.matrices && !force) return state.matrices;
     var response = await fetch(API + "/matrices/preview?size=16", { headers: { "Accept": "application/json" } });
@@ -1522,7 +1826,7 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
   async function refreshAll(options) {
     var quiet = options && options.quiet;
     var results = await Promise.allSettled([
-      refreshStats(), refreshQueue(), refreshCache(), loadTracks(), loadMatrices(false), refreshLocalIndex()
+      refreshStats(), refreshQueue(), refreshCache(), loadTracks(), loadDatabases(), loadMatrices(false), refreshLocalIndex()
     ]);
     var failed = results.filter(function (result) {
       return result.status === "rejected" && (!result.reason || !result.reason.status || result.reason.status >= 500);
@@ -1611,6 +1915,41 @@ body[data-menu="open"] .scrim{opacity:1;pointer-events:auto}
   if ($("trackFilter")) {
     $("trackFilter").addEventListener("input", function () { renderTracks(TRACKS.length); });
   }
+  if ($("dbRefresh")) {
+    $("dbRefresh").addEventListener("click", function () { loadDatabases(); });
+  }
+  if ($("dbSongSearch")) {
+    $("dbSongSearch").addEventListener("click", function () { loadDbSongs().catch(function (error) { dbMessage(error.message, true); }); });
+  }
+  if ($("dbSongQuery")) {
+    $("dbSongQuery").addEventListener("keydown", function (event) {
+      if (event.key === "Enter") loadDbSongs().catch(function (error) { dbMessage(error.message, true); });
+    });
+  }
+  if ($("dbSongNew")) $("dbSongNew").addEventListener("click", function () { openDbEditor(null); });
+  if ($("dbCancel")) $("dbCancel").addEventListener("click", closeDbEditor);
+  if ($("dbSave")) $("dbSave").addEventListener("click", saveDbSong);
+  if ($("dbTabSongs")) $("dbTabSongs").addEventListener("click", function () { switchDbTab("songs"); });
+  if ($("dbTabVectors")) $("dbTabVectors").addEventListener("click", function () { switchDbTab("vectors"); });
+  if ($("dbRebuild")) $("dbRebuild").addEventListener("click", rebuildVectors);
+  if ($("dbReset")) $("dbReset").addEventListener("click", resetVectors);
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    var edit = target.getAttribute("data-db-edit");
+    if (edit) {
+      var song = DB.songs.filter(function (row) { return row.video_id === edit; })[0];
+      if (song) openDbEditor(song);
+      return;
+    }
+    var del = target.getAttribute("data-db-delete");
+    if (del) { deleteDbSong(del); return; }
+    var reembed = target.getAttribute("data-db-reembed");
+    if (reembed) { reembedVector(reembed); return; }
+    var vdel = target.getAttribute("data-db-vdelete");
+    if (vdel) { deleteDbVector(vdel); }
+  });
+
   $("refreshMatrices").addEventListener("click", function () {
     loadMatrices(true).then(function () { toast("Matrix preview reloaded"); }).catch(function (error) { toast(error.message, "error"); });
   });

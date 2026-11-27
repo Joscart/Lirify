@@ -139,6 +139,7 @@ class EmbeddingTests(unittest.TestCase):
     def setUp(self):
         self.indexer = make_indexer()
         self.indexer.indexar_canciones(DOCS)
+        self.indexer.construir_matriz_embeddings_llm()
 
     def test_matrix_shape_matches_documents(self):
         matrix = self.indexer.matriz_embeddings_llm
@@ -146,9 +147,11 @@ class EmbeddingTests(unittest.TestCase):
         self.assertEqual(matrix.shape, (3, 64))
         self.assertEqual(matrix.dtype, np.float32)
 
-    def test_incremental_indexing_appends_rows(self):
+    def test_indexing_keeps_embeddings_lazy_until_requested(self):
         indexer = make_indexer()
         indexer.indexar_canciones(DOCS[:2])
+        self.assertIsNone(indexer.matriz_embeddings_llm)
+        indexer.construir_matriz_embeddings_llm()
         self.assertEqual(indexer.matriz_embeddings_llm.shape, (2, 64))
         indexer.indexar_canciones(DOCS[2:])
         self.assertEqual(indexer.matriz_embeddings_llm.shape, (3, 64))
@@ -194,6 +197,44 @@ class EmbeddingTests(unittest.TestCase):
         payload = self.indexer.recomendar(["zzzzzzzzzzz"], limite=2)
         self.assertEqual(payload["recommendations"], [])
 
+    def test_update_rewrites_terms_and_metadata(self):
+        self.indexer.actualizar_cancion(
+            {
+                "video_id": "bbbbbbbbbbb",
+                "track": "Invierno",
+                "artist": "Sur",
+                "language": "es",
+                "lyrics": "el invierno frio y la nieve en el camino",
+                "backend": "manual",
+            }
+        )
+        self.assertEqual(
+            self.indexer.buscar("invierno", 1)["results"][0]["video_id"], "bbbbbbbbbbb"
+        )
+        self.assertNotIn("winter", self.indexer.vocabulary)
+        self.assertEqual(self.indexer.titulos[1], "Invierno")
+        self.assertEqual(self.indexer.backends[1], "manual")
+
+    def test_update_unknown_song_returns_false(self):
+        self.assertFalse(
+            self.indexer.actualizar_cancion({"video_id": "zzzzzzzzzzz", "lyrics": "x"})
+        )
+
+    def test_delete_middle_song_compacts_the_index(self):
+        self.assertTrue(self.indexer.eliminar_cancion("aaaaaaaaaaa"))
+        self.assertEqual(self.indexer.estadisticas()["songs_indexed"], 2)
+        self.assertIsNone(self.indexer.id_de("aaaaaaaaaaa"))
+        self.assertEqual(self.indexer.matriz_embeddings_llm.shape, (2, 64))
+        self.assertEqual(
+            self.indexer.buscar("winter", 2)["results"][0]["video_id"], "bbbbbbbbbbb"
+        )
+        self.assertFalse(self.indexer.eliminar_cancion("aaaaaaaaaaa"))
+
+    def test_delete_last_song_truncates_rows(self):
+        self.assertTrue(self.indexer.eliminar_cancion("ccccccccccc"))
+        self.assertEqual(self.indexer.matriz_embeddings_llm.shape, (2, 64))
+        self.assertEqual(sorted(self.indexer.docs_id), [0, 1])
+
     def test_statistics_are_consistent(self):
         stats = self.indexer.estadisticas()
         self.assertEqual(stats["songs_indexed"], 3)
@@ -207,6 +248,7 @@ class SerializationTests(unittest.TestCase):
     def setUp(self):
         self.indexer = make_indexer()
         self.indexer.indexar_canciones(DOCS)
+        self.indexer.construir_matriz_embeddings_llm()
 
     def test_roundtrip_dict_keeps_documents_and_search(self):
         payload = self.indexer.a_diccionario(incluir_embeddings=True)
@@ -230,6 +272,7 @@ class PublicacionTests(unittest.TestCase):
     def setUp(self):
         self.indexer = make_indexer()
         self.indexer.indexar_canciones(DOCS)
+        self.indexer.construir_matriz_embeddings_llm()
 
     def test_mongo_documents_use_camel_case_and_no_matrices(self):
         documents = self.indexer._documentos_mongo()
@@ -251,18 +294,18 @@ class PublicacionTests(unittest.TestCase):
         )
         self.assertNotIn("lyrics", points[0]["payload"])
 
-    def test_publicar_writes_songs_embeddings_and_scalar_stats(self):
-        captured = {}
+    def _publicar(self, captured, **kwargs):
         fake = _fake_cloud(captured)
         previous = {name: sys.modules.get(name) for name in ("pymongo", "requests")}
         sys.modules["pymongo"] = fake["pymongo"]
         sys.modules["requests"] = fake["requests"]
         try:
-            payload = self.indexer.publicar(
+            return self.indexer.publicar(
                 mongo_uri="mongodb://fake",
                 db_name="lirify",
                 qdrant_url="http://qdrant",
                 coleccion="lirify_lyrics_qwen3",
+                **kwargs,
             )
         finally:
             for name, module in previous.items():
@@ -270,6 +313,21 @@ class PublicacionTests(unittest.TestCase):
                     sys.modules.pop(name, None)
                 else:
                     sys.modules[name] = module
+
+    def test_publicar_batch_only_embeds_the_new_songs(self):
+        captured = {}
+        payload = self._publicar(captured, solo=[DOCS[1]])
+        self.assertEqual(payload["songs"], 1)
+        self.assertEqual(payload["vectors"], 1)
+        self.assertEqual(len(captured["songs_ops"]), 1)
+        self.assertEqual(len(captured["qdrant_points"]), 1)
+        self.assertEqual(
+            captured["qdrant_points"][0]["payload"]["video_id"], "bbbbbbbbbbb"
+        )
+
+    def test_publicar_writes_songs_embeddings_and_scalar_stats(self):
+        captured = {}
+        payload = self._publicar(captured)
 
         self.assertTrue(payload["published"])
         self.assertEqual(

@@ -342,6 +342,15 @@ docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
 The model is `Qwen/Qwen3-Embedding-0.6B` (~1.2 GB) and is cached in the
 `hf_cache` volume on first start. Deleting that volume forces a re-download.
 
+The image installs **CPU torch** by default so it builds on hosts without the
+NVIDIA container runtime. After configuring nvidia-container-toolkit (and
+adding the `deploy.resources` block back), build the CUDA variant:
+
+```bash
+docker build -f services/local-indexer/Dockerfile \
+  --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124 .
+```
+
 ### 10.2 Start local-indexer + local-ui
 
 ```bash
@@ -369,6 +378,22 @@ LOAD_ON_START=1
 library and duplicate detection. `PUBLISH_ON_INDEX=1` publishes after every
 committed playlist.
 
+The overlay also sets `QUERY_EMBED_URL=http://local-indexer:8080` on `api` and
+`SEMANTIC_SEARCH=true` on `web`: web search posts the raw query to
+`/db/embed`, which runs the same Qwen3-Embedding-0.6B model used for indexing,
+then searches Qdrant. The first query after a cold start downloads the model
+into the `hf_cache` volume.
+
+For a deployment that cannot reach the laptop, add Cloudflare Workers AI
+credentials to `.env` (`CF_ACCOUNT_ID`, `CF_API_TOKEN`, optional
+`CF_EMBED_MODEL=@cf/qwen/qwen3-embedding-0.6b`). `python-backend` uses them when
+`QUERY_EMBED_URL` is empty or unreachable. Check the model directly:
+
+```bash
+scripts/local/verify_cloudflare_embed.py "amor de verano" "winter love"
+# prints dim (must be 1024), cosine matrix and the equivalent curl command
+```
+
 ### 10.3 Index and publish
 
 1. Open <http://localhost:8090>.
@@ -378,7 +403,11 @@ committed playlist.
 4. **Publish to cloud** re-runs the same write for the whole in-memory index.
    It is mainly for a first backfill or after switching the Qdrant collection.
    An unchanged index is simply re-upserted; there is no local fingerprint file.
-5. The cloud replica notices the new revision within
+5. **Databases** (local-ui) is the CRUD/reset panel. It edits Atlas songs one at
+   a time, deletes/re-embeds individual Qdrant points, rebuilds every vector, and
+   offers **Reset to zero**: drop the collection, reload from Atlas and re-embed
+   from scratch. The admin HTTP app listens on `127.0.0.1:8082` only.
+6. The cloud replica notices the new revision within
    `INDEX_REFRESH_SECONDS`/`INDEX_CHECK_SECONDS`; to force it:
 
 ```bash
@@ -397,7 +426,21 @@ curl -s -X POST "$API/admin/reload"
 No matrices are stored in either database and no container writes to disk. There
 are no `vocabulary.json` / `inverted_index.json` files to manage.
 
-### 10.5 Inspect the local engine
+### 10.5 Run the indexer from source (dev container)
+
+```bash
+scripts/local/run_indexer_dev.sh
+# gRPC:  127.0.0.1:50052
+# admin: 127.0.0.1:8082  (/db/health, /db/overview)
+```
+
+The script mounts `services/local-indexer` over `/app` and the generated
+`lirifypb` package, so edits to `core.py`, `pipeline.py`, `db_admin.py` or
+`admin_api.py` apply after `docker restart lirify-local-indexer-dev`. It runs
+with `LOAD_ON_START=0` for a fast boot; the database panel reloads from Atlas on
+demand. The HF model cache is the shared `lirify_hf_cache` volume.
+
+### 10.6 Inspect the local engine
 
 ```bash
 grpcurl -proto proto/lirify.proto -plaintext localhost:50052 \
